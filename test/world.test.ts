@@ -21,7 +21,7 @@ const capture: CaptureDocument = {
     },
   ],
   entities: [
-    { pos: [10.5, 65, 10.5], nbt: { id: "minecraft:armor_stand", Invisible: false } },
+    { pos: [10.5, 65, 10], nbt: { id: "minecraft:armor_stand", Invisible: false } },
   ],
 };
 
