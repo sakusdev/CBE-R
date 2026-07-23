@@ -1,11 +1,12 @@
 {
   "name": "cbe-r",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Capture Bedrock Edition structures and export them as Java Edition structure NBT.",
   "type": "module",
   "license": "MPL-2.0",
   "bin": {
-    "cbe-r": "dist/src/cli.js"
+    "cbe-r": "dist/src/cli.js",
+    "cbe-r-gui": "dist/src/gui-cli.js"
   },
   "exports": "./dist/src/index.js",
   "types": "./dist/src/index.d.ts",
@@ -22,7 +23,8 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "npm run build && node --test dist/test",
     "check": "npm run typecheck && npm test",
-    "start": "node dist/src/cli.js"
+    "start": "node dist/src/cli.js",
+    "gui": "node dist/src/gui-cli.js"
   },
   "dependencies": {
     "bedrock-protocol": "^3.56.1"
