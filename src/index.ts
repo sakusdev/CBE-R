@@ -29,6 +29,8 @@ export type {
   JournalSummary,
 } from "./journal.js";
 export { encodeJavaStructure, encodeJavaStructureGzip } from "./nbt.js";
+export { captureBounds, regionFilename, splitBounds } from "./planning.js";
+export type { StructureRegion } from "./planning.js";
 export { extractJavaStructure, normalizeBounds, validateCaptureDocument } from "./world.js";
 export type { ExtractOptions } from "./world.js";
 export type {
