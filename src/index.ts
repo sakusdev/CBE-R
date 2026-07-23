@@ -2,9 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-export {
-  convertBedrockBlockState,
-} from "./bedrock.js";
+export { convertBedrockBlockState } from "./bedrock.js";
 export type {
   BedrockBlockState,
   BedrockStateValue,
@@ -12,4 +10,18 @@ export type {
   UnsupportedBlockPolicy,
 } from "./bedrock.js";
 export { encodeJavaStructure, encodeJavaStructureGzip } from "./nbt.js";
-export type { JavaBlockState, JavaStructure, StructureBlock, Vec3 } from "./types.js";
+export { extractJavaStructure, normalizeBounds, validateCaptureDocument } from "./world.js";
+export type { ExtractOptions } from "./world.js";
+export type {
+  CaptureBlock,
+  CaptureDocument,
+  CaptureEntity,
+  JavaBlockState,
+  JavaStructure,
+  NbtCompound,
+  NbtScalar,
+  NbtValue,
+  StructureBlock,
+  StructureEntity,
+  Vec3,
+} from "./types.js";
