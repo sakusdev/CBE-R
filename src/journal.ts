@@ -166,12 +166,16 @@ export function decodeJournalToCapture(text: string, options: DecodeJournalOptio
   const decoders = options.decoders ?? [normalizedPacketDecoder];
   const blocks = new Map<string, CaptureBlock>();
   const entities: CaptureEntity[] = [];
+  const context: DecodeContext = {
+    records,
+    ...(protocolVersion ? { protocolVersion } : {}),
+  };
   let dimension: string | undefined;
 
   for (const record of records) {
     for (const decoder of decoders) {
       if (decoder.versions !== "*" && (!protocolVersion || !decoder.versions.includes(protocolVersion))) continue;
-      const partial = decoder.decode(record, { protocolVersion, records });
+      const partial = decoder.decode(record, context);
       if (!partial) continue;
       if (partial.dimension) dimension = partial.dimension;
       for (const block of partial.blocks ?? []) blocks.set(block.pos.join(","), block);
