@@ -4,8 +4,10 @@
 
 import type { CaptureBlock, CaptureDocument, CaptureEntity } from "./types.js";
 
+type JournalRecordType = "header" | "event" | "packet" | "footer";
+
 export interface JournalPacketRecord {
-  readonly type?: "header" | "event" | "packet" | "footer";
+  readonly type?: JournalRecordType;
   readonly time?: string;
   readonly event?: string;
   readonly name?: string;
@@ -52,6 +54,10 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
+function isJournalRecordType(value: unknown): value is JournalRecordType {
+  return value === "header" || value === "event" || value === "packet" || value === "footer";
+}
+
 /** Restores Buffer, BigInt, and circular wrappers emitted by current and legacy recorders. */
 export function hydrateJournalValue(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(hydrateJournalValue);
@@ -61,17 +67,11 @@ export function hydrateJournalValue(value: unknown): unknown {
   if (typeof value.$bigint === "string") return BigInt(value.$bigint);
   if (value.$circular === true) return undefined;
 
-  if (value.type === "Buffer" && typeof value.data === "string") {
-    return Buffer.from(value.data, "base64");
-  }
-  if (value.type === "BigInt" && typeof value.data === "string") {
-    return BigInt(value.data);
-  }
+  if (value.type === "Buffer" && typeof value.data === "string") return Buffer.from(value.data, "base64");
+  if (value.type === "BigInt" && typeof value.data === "string") return BigInt(value.data);
   if (value.type === "Circular") return undefined;
 
-  return Object.fromEntries(
-    Object.entries(value).map(([key, entry]) => [key, hydrateJournalValue(entry)]),
-  );
+  return Object.fromEntries(Object.entries(value).map(([key, entry]) => [key, hydrateJournalValue(entry)]));
 }
 
 function normalizeJournalRecord(value: Record<string, unknown>): JournalPacketRecord {
@@ -88,7 +88,7 @@ function normalizeJournalRecord(value: Record<string, unknown>): JournalPacketRe
 
   return {
     ...value,
-    ...(typeof type === "string" ? { type: type as JournalPacketRecord["type"] } : {}),
+    ...(isJournalRecordType(type) ? { type } : {}),
     ...(typeof event === "string" ? { event } : {}),
     ...(params !== undefined ? { params } : {}),
     ...(version ? { version } : {}),
@@ -169,10 +169,6 @@ function validCaptureEntity(value: unknown): value is CaptureEntity {
     && isRecord(value.nbt);
 }
 
-/**
- * Decoder for adapters/fixtures that attach normalized `blocks` and `entities`
- * arrays directly to level_chunk or sub_chunk packet params.
- */
 export const normalizedPacketDecoder: JournalDecoder = {
   id: "normalized-packet-v1",
   versions: "*",
