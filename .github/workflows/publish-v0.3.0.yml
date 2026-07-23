@@ -10,6 +10,7 @@ on:
       - main
     paths:
       - ".github/workflows/publish-v0.3.0.yml"
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -74,44 +75,24 @@ jobs:
           sha256sum * > SHA256SUMS.txt
           sha256sum --check SHA256SUMS.txt
 
-      - name: Create release and upload assets
-        env:
-          GH_TOKEN: ${{ github.token }}
-        shell: bash
-        run: |
-          set -euxo pipefail
-          TAG=v0.3.0
-          if ! gh release view "$TAG" >/dev/null 2>&1; then
-            gh release create "$TAG" \
-              --target "$GITHUB_SHA" \
-              --title "CBE-R v0.3.0" \
-              --notes "Initial usable release with CLI and local browser GUI. Includes Node-free standalone builds for Windows, Linux, and macOS. Use only on servers and builds you are authorized to copy."
-          fi
-          gh release upload "$TAG" release/* --clobber
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: cbe-r-v0.3.0-release-assets
+          path: release/*
+          if-no-files-found: error
 
-      - name: Record successful publication
-        shell: bash
-        run: |
-          set -euxo pipefail
-          mkdir -p .release
-          cat > .release/v0.3.0.json <<'JSON'
-          {
-            "tag": "v0.3.0",
-            "release": "https://github.com/sakusdev/CBE-R/releases/tag/v0.3.0",
-            "assets": [
-              "cbe-r-v0.3.0-windows-x64.zip",
-              "cbe-r-v0.3.0-linux-x64.tar.gz",
-              "cbe-r-v0.3.0-linux-arm64.tar.gz",
-              "cbe-r-v0.3.0-macos-x64.tar.gz",
-              "cbe-r-v0.3.0-macos-arm64.tar.gz",
-              "cbe-r-0.3.0.tgz",
-              "SHA256SUMS.txt"
-            ],
-            "status": "published"
-          }
-          JSON
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add .release/v0.3.0.json
-          git commit -m "Record v0.3.0 release publication" || exit 0
-          git push
+      - name: Create or update GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v0.3.0
+          target_commitish: main
+          name: CBE-R v0.3.0
+          body: |
+            Initial usable release with CLI and local browser GUI.
+
+            Includes Node-free standalone builds for Windows, Linux, and macOS.
+            Use only on servers and builds you are authorized to copy.
+          files: release/*
+          fail_on_unmatched_files: true
+          overwrite_files: true
