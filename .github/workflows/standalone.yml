@@ -37,20 +37,27 @@ jobs:
         run: |
           set -euxo pipefail
           mkdir -p release
-          bun build src/cli.ts --compile --target=bun-linux-x64-baseline --outfile release/cbe-r-linux-x64
-          bun build src/cli.ts --compile --target=bun-linux-arm64 --outfile release/cbe-r-linux-arm64
-          bun build src/cli.ts --compile --target=bun-windows-x64 --outfile release/cbe-r-windows-x64.exe
-          bun build src/cli.ts --compile --target=bun-darwin-x64 --outfile release/cbe-r-macos-x64
-          bun build src/cli.ts --compile --target=bun-darwin-arm64 --outfile release/cbe-r-macos-arm64
+          for entry in cli gui-cli; do
+            name="cbe-r"
+            if [ "$entry" = "gui-cli" ]; then name="cbe-r-gui"; fi
+            bun build "src/$entry.ts" --compile --target=bun-linux-x64-baseline --outfile "release/$name-linux-x64"
+            bun build "src/$entry.ts" --compile --target=bun-linux-arm64 --outfile "release/$name-linux-arm64"
+            bun build "src/$entry.ts" --compile --target=bun-windows-x64 --outfile "release/$name-windows-x64.exe"
+            bun build "src/$entry.ts" --compile --target=bun-darwin-x64 --outfile "release/$name-macos-x64"
+            bun build "src/$entry.ts" --compile --target=bun-darwin-arm64 --outfile "release/$name-macos-arm64"
+          done
 
-      - name: Validate Linux executable
+      - name: Validate Linux executables
         shell: bash
         run: |
           set -euxo pipefail
-          chmod +x release/cbe-r-linux-x64
-          test -x release/cbe-r-linux-x64
-          test -s release/cbe-r-linux-x64
-          file release/cbe-r-linux-x64 | grep -q "ELF 64-bit"
+          chmod +x release/cbe-r-linux-x64 release/cbe-r-gui-linux-x64
+          for binary in release/cbe-r-linux-x64 release/cbe-r-gui-linux-x64; do
+            test -x "$binary"
+            test -s "$binary"
+            file "$binary" | grep -q "ELF 64-bit"
+          done
+          release/cbe-r-gui-linux-x64 --help | grep -q "Usage: cbe-r-gui"
 
       - name: Generate and verify checksums
         shell: bash
