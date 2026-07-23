@@ -49,7 +49,7 @@ jobs:
           set -euxo pipefail
           chmod +x release/cbe-r-linux-x64
           set +e
-          output="$(release/cbe-r-linux-x64 --help 2>&1)"
+          output="$(release/cbe-r-linux-x64 export 2>&1)"
           status=$?
           set -e
           printf '%s\n' "$output"
