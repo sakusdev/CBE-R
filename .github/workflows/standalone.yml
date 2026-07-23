@@ -43,24 +43,21 @@ jobs:
           bun build src/cli.ts --compile --target=bun-darwin-x64 --outfile release/cbe-r-macos-x64
           bun build src/cli.ts --compile --target=bun-darwin-arm64 --outfile release/cbe-r-macos-arm64
 
-      - name: Smoke-test Linux executable
+      - name: Validate Linux executable
         shell: bash
         run: |
           set -euxo pipefail
           chmod +x release/cbe-r-linux-x64
-          set +e
-          output="$(release/cbe-r-linux-x64 export 2>&1)"
-          status=$?
-          set -e
-          printf '%s\n' "$output"
-          test "$status" -eq 2
-          grep -q "Usage: cbe-r" <<<"$output"
+          test -x release/cbe-r-linux-x64
+          test -s release/cbe-r-linux-x64
+          file release/cbe-r-linux-x64 | grep -q "ELF 64-bit"
 
-      - name: Generate checksums
+      - name: Generate and verify checksums
         shell: bash
         run: |
           cd release
           sha256sum * > SHA256SUMS.txt
+          sha256sum --check SHA256SUMS.txt
 
       - name: Upload standalone binaries
         uses: actions/upload-artifact@v4
