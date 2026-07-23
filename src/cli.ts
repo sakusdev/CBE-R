@@ -6,6 +6,7 @@
 import { readFile, writeFile } from "node:fs/promises";
 import { basename } from "node:path";
 import process from "node:process";
+import { decodeJournalToCapture, summarizeJournal } from "./journal.js";
 import { captureBedrockSession } from "./live.js";
 import type { LiveCaptureOptions } from "./live.js";
 import { encodeJavaStructure, encodeJavaStructureGzip } from "./nbt.js";
@@ -16,10 +17,13 @@ function usage(exitCode = 2): never {
   console.error(`CBE-R
 
 Commands:
-  cbe-r export --input capture.json --output building.nbt --from x,y,z --to x,y,z [options]
   cbe-r capture --host example.org --username ProfileName --output session.ndjson [options]
+  cbe-r analyze --input session.ndjson [--json]
+  cbe-r decode --input session.ndjson --output capture.json [--strict] [--version <version>]
+  cbe-r export --input capture.json --output building.nbt --from x,y,z --to x,y,z [options]
+  cbe-r pipeline --input session.ndjson --output building.nbt --from x,y,z --to x,y,z [options]
 
-Export options:
+Export/pipeline options:
   --data-version <number>       Java DataVersion (default: 3955)
   --uncompressed                Write raw NBT instead of gzip NBT
   --include-air                 Include captured air blocks
@@ -34,6 +38,10 @@ Capture options:
   --duration <seconds>          Stop automatically after N seconds
   --connect-timeout <seconds>   Connection timeout (default: 15)
   --raknet jsp-raknet|raknet-node|raknet-native
+
+Decode/analyze options:
+  --strict                      Reject malformed or unsupported journals
+  --json                        Print machine-readable analysis
 
   --help                        Show this help`);
   process.exit(exitCode);
@@ -76,30 +84,96 @@ function positiveInteger(value: string | undefined, option: string, fallback?: n
   return parsed;
 }
 
-async function exportCommand(argv: readonly string[]): Promise<void> {
-  const { values, flags } = parseTokens(argv, ["--uncompressed", "--include-air", "--include-entities"]);
-  const input = values.get("--input");
+interface ExportOptions {
+  readonly output: string;
+  readonly from: Vec3;
+  readonly to: Vec3;
+  readonly dataVersion: number;
+  readonly compressed: boolean;
+  readonly includeAir: boolean;
+  readonly includeEntities: boolean;
+  readonly unsupported: "barrier" | "air" | "throw";
+}
+
+function parseExportOptions(values: Map<string, string>, flags: Set<string>): ExportOptions {
   const output = values.get("--output");
-  if (!input || !output) usage();
+  if (!output) usage();
   const unsupported = values.get("--unsupported") ?? "barrier";
   if (unsupported !== "barrier" && unsupported !== "air" && unsupported !== "throw") {
     throw new TypeError("--unsupported must be barrier, air, or throw");
   }
-
-  const parsed: unknown = JSON.parse(await readFile(input, "utf8"));
-  validateCaptureDocument(parsed);
-  const document: CaptureDocument = parsed;
-  const structure = extractJavaStructure(document, parseVec3(values.get("--from"), "--from"), parseVec3(values.get("--to"), "--to"), {
+  return {
+    output,
+    from: parseVec3(values.get("--from"), "--from"),
+    to: parseVec3(values.get("--to"), "--to"),
     dataVersion: positiveInteger(values.get("--data-version"), "--data-version", 3955),
+    compressed: !flags.has("--uncompressed"),
     includeAir: flags.has("--include-air"),
     includeEntities: flags.has("--include-entities"),
-    unsupportedBlockPolicy: unsupported,
+    unsupported,
+  };
+}
+
+async function writeStructure(document: CaptureDocument, options: ExportOptions): Promise<void> {
+  const structure = extractJavaStructure(document, options.from, options.to, {
+    dataVersion: options.dataVersion,
+    includeAir: options.includeAir,
+    includeEntities: options.includeEntities,
+    unsupportedBlockPolicy: options.unsupported,
   });
-  const encoded = flags.has("--uncompressed") ? encodeJavaStructure(structure) : encodeJavaStructureGzip(structure);
-  await writeFile(output, encoded);
+  const encoded = options.compressed ? encodeJavaStructureGzip(structure) : encodeJavaStructure(structure);
+  await writeFile(options.output, encoded);
   const barriers = structure.blocks.filter(({ state }) => state.name === "minecraft:barrier").length;
-  console.log(`${basename(output)}: ${structure.blocks.length} blocks, ${structure.entities?.length ?? 0} entities, ${encoded.length} bytes`);
+  console.log(`${basename(options.output)}: ${structure.blocks.length} blocks, ${structure.entities?.length ?? 0} entities, ${encoded.length} bytes`);
   if (barriers > 0) console.warn(`Warning: ${barriers} unsupported block states were replaced with barriers`);
+}
+
+async function exportCommand(argv: readonly string[]): Promise<void> {
+  const { values, flags } = parseTokens(argv, ["--uncompressed", "--include-air", "--include-entities"]);
+  const input = values.get("--input");
+  if (!input) usage();
+  const parsed: unknown = JSON.parse(await readFile(input, "utf8"));
+  validateCaptureDocument(parsed);
+  await writeStructure(parsed, parseExportOptions(values, flags));
+}
+
+async function analyzeCommand(argv: readonly string[]): Promise<void> {
+  const { values, flags } = parseTokens(argv, ["--json"]);
+  const input = values.get("--input");
+  if (!input) usage();
+  const summary = summarizeJournal(await readFile(input, "utf8"));
+  if (flags.has("--json")) {
+    console.log(JSON.stringify(summary, null, 2));
+    return;
+  }
+  console.log(`${basename(input)}: ${summary.records} records, ${summary.packets} packets, ${summary.chunkPackets} chunk packets, ${summary.malformedLines} malformed lines`);
+  for (const [name, count] of Object.entries(summary.packetNames).sort((a, b) => b[1] - a[1])) {
+    console.log(`${name}: ${count}`);
+  }
+}
+
+async function decodeCommand(argv: readonly string[]): Promise<void> {
+  const { values, flags } = parseTokens(argv, ["--strict"]);
+  const input = values.get("--input");
+  const output = values.get("--output");
+  if (!input || !output) usage();
+  const document = decodeJournalToCapture(await readFile(input, "utf8"), {
+    strict: flags.has("--strict"),
+    ...(values.has("--version") ? { protocolVersion: values.get("--version")! } : {}),
+  });
+  await writeFile(output, `${JSON.stringify(document, null, 2)}\n`, "utf8");
+  console.log(`${basename(output)}: ${document.blocks.length} blocks, ${document.entities?.length ?? 0} entities`);
+}
+
+async function pipelineCommand(argv: readonly string[]): Promise<void> {
+  const { values, flags } = parseTokens(argv, ["--strict", "--uncompressed", "--include-air", "--include-entities"]);
+  const input = values.get("--input");
+  if (!input) usage();
+  const document = decodeJournalToCapture(await readFile(input, "utf8"), {
+    strict: flags.has("--strict"),
+    ...(values.has("--version") ? { protocolVersion: values.get("--version")! } : {}),
+  });
+  await writeStructure(document, parseExportOptions(values, flags));
 }
 
 async function captureCommand(argv: readonly string[]): Promise<void> {
@@ -125,9 +199,7 @@ async function captureCommand(argv: readonly string[]): Promise<void> {
   const profilesFolder = values.get("--profiles-folder");
   if (version !== undefined) Object.assign(options, { version });
   if (profilesFolder !== undefined) Object.assign(options, { profilesFolder });
-  if (values.has("--duration")) {
-    Object.assign(options, { durationMs: positiveInteger(values.get("--duration"), "--duration") * 1000 });
-  }
+  if (values.has("--duration")) Object.assign(options, { durationMs: positiveInteger(values.get("--duration"), "--duration") * 1000 });
   const summary = await captureBedrockSession(options);
   console.log(`${basename(summary.output)}: ${summary.packets} packets captured (${summary.closeReason})`);
 }
@@ -138,6 +210,9 @@ async function main(): Promise<void> {
   const command = argv[0];
   if (command === "export") return exportCommand(argv.slice(1));
   if (command === "capture") return captureCommand(argv.slice(1));
+  if (command === "analyze") return analyzeCommand(argv.slice(1));
+  if (command === "decode") return decodeCommand(argv.slice(1));
+  if (command === "pipeline") return pipelineCommand(argv.slice(1));
   throw new TypeError(`Unknown command: ${command}`);
 }
 

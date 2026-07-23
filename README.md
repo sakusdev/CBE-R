@@ -1,26 +1,26 @@
 # CBE-R
 
-CBE-R converts Minecraft Bedrock Edition block captures into Minecraft Java Edition Structure NBT files.
+CBE-R records Minecraft Bedrock Edition client traffic and converts authorized block captures into Minecraft Java Edition Structure NBT files.
 
 > Use it only on servers and builds you are authorized to copy. CBE-R does not bypass permissions, hidden chunks, or server-side access controls.
 
 ## Implemented
 
+- authenticated or offline Bedrock packet recording to append-only NDJSON
+- packet journal validation, statistics, Buffer/BigInt restoration, and chunk-packet extraction
+- pluggable protocol decoder registry
+- normalized packet/fixture decoder and CaptureDocument generation
+- direct journal-to-NBT pipeline command
 - Java Structure NBT palette, block, block-entity, and entity encoding
-- gzip-compressed and uncompressed output
-- normalized Bedrock capture JSON input
 - rectangular range selection and coordinate rebasing
-- initial Bedrock-to-Java conversion for common blocks
-- logs, slabs, stairs, doors, trapdoors, fences, walls, panes, fluids, signs, containers, leaves, and snow
-- neighbor pass for stairs and connectable blocks
+- common Bedrock-to-Java block-state conversion and neighbor resolution
 - unsupported-block policies: barrier, air, or error
-- command-line export
-- authenticated/offline Bedrock packet recording to append-only NDJSON
-- GitHub Actions typecheck, test, npm package build, standalone executable build, checksums, and artifact upload
+- Node.js package and standalone Windows/Linux/macOS binaries
+- GitHub Actions typecheck, tests, package creation, binary validation, checksums, and artifact upload
 
 ## Standalone executables
 
-GitHub Actions builds binaries that include their own runtime, so end users do not need Node.js or Bun installed:
+GitHub Actions builds binaries containing their own runtime. End users do not need Node.js or Bun:
 
 - Windows x64: `cbe-r-windows-x64.exe`
 - Linux x64: `cbe-r-linux-x64`
@@ -28,30 +28,84 @@ GitHub Actions builds binaries that include their own runtime, so end users do n
 - macOS Intel: `cbe-r-macos-x64`
 - macOS Apple Silicon: `cbe-r-macos-arm64`
 
-Download the `cbe-r-standalone` artifact from a successful **Standalone binaries** workflow run. Verify it against `SHA256SUMS.txt`, extract it, and run the executable directly.
-
-On Linux and macOS, make it executable if necessary:
+Download the `cbe-r-standalone` artifact from a successful **Standalone binaries** workflow run and verify it using `SHA256SUMS.txt`.
 
 ```bash
 chmod +x cbe-r-linux-x64
 ./cbe-r-linux-x64 --help
 ```
 
-The binaries are built with Bun's standalone compiler. The Linux x64 build uses the baseline target for compatibility with older x86-64 processors.
+## CLI workflow
 
-## Development requirements
-
-Node.js 20 or newer is only required when building from source.
+Record packets delivered to the authenticated client:
 
 ```bash
-npm install
-npm run check
-npm run build
+cbe-r capture \
+  --host example.org \
+  --port 19132 \
+  --username ProfileName \
+  --profiles-folder .auth \
+  --output session.ndjson
 ```
+
+Inspect the journal before decoding:
+
+```bash
+cbe-r analyze --input session.ndjson
+cbe-r analyze --input session.ndjson --json
+```
+
+Convert supported chunk records into normalized capture JSON:
+
+```bash
+cbe-r decode \
+  --input session.ndjson \
+  --output capture.json \
+  --strict
+```
+
+Export normalized capture JSON to Java Structure NBT:
+
+```bash
+cbe-r export \
+  --input capture.json \
+  --output building.nbt \
+  --from 100,64,100 \
+  --to 140,100,140 \
+  --include-entities
+```
+
+Decode and export in one command:
+
+```bash
+cbe-r pipeline \
+  --input session.ndjson \
+  --output building.nbt \
+  --from 100,64,100 \
+  --to 140,100,140 \
+  --include-entities \
+  --strict
+```
+
+Export options:
+
+- `--data-version 3955`
+- `--uncompressed`
+- `--include-air`
+- `--include-entities`
+- `--unsupported barrier|air|throw`
+
+Place the result under:
+
+```text
+saves/<world>/generated/minecraft/structures/building.nbt
+```
+
+Then load `minecraft:building` from a Java Edition structure block.
 
 ## Capture format
 
-CBE-R uses this normalized JSON format between packet decoding and structure conversion:
+The stable conversion boundary is:
 
 ```json
 {
@@ -68,82 +122,53 @@ CBE-R uses this normalized JSON format between packet decoding and structure con
           "upside_down_bit": false
         }
       }
-    },
-    {
-      "pos": [101, 64, 100],
-      "block": { "name": "minecraft:chest", "states": { "direction": 2 } },
-      "blockEntity": { "id": "minecraft:chest", "CustomName": "Storage" }
     }
   ],
-  "entities": [
-    {
-      "pos": [100.5, 65, 100.5],
-      "nbt": { "id": "minecraft:armor_stand", "Invisible": false }
-    }
-  ]
+  "entities": []
 }
 ```
 
-Only chunks delivered to the client can be represented. A capture adapter must not attempt to retrieve unloaded or unauthorized server data.
+Packet adapters and version decoders may attach normalized `blocks` and `entities` arrays to `level_chunk` or `sub_chunk` records. The built-in normalized decoder merges those records, applies last-write-wins behavior by block coordinate, and emits this format.
 
-## CLI
-
-Capture a reproducible packet journal from a server:
-
-```bash
-cbe-r capture \
-  --host example.org \
-  --port 19132 \
-  --username ProfileName \
-  --profiles-folder .auth \
-  --output session.ndjson
-```
-
-Export a normalized capture to Java Structure NBT:
-
-```bash
-cbe-r export \
-  --input capture.json \
-  --output building.nbt \
-  --from 100,64,100 \
-  --to 140,100,140 \
-  --include-entities
-```
-
-Export options:
-
-- `--data-version 3955`
-- `--uncompressed`
-- `--include-air`
-- `--include-entities`
-- `--unsupported barrier|air|throw`
-
-Place the resulting file under:
-
-```text
-saves/<world>/generated/minecraft/structures/building.nbt
-```
-
-Then load `minecraft:building` from a Java Edition structure block.
-
-## Library API
+## Decoder API
 
 ```ts
-import { encodeJavaStructureGzip, extractJavaStructure } from "cbe-r";
+import {
+  decodeJournalToCapture,
+  type JournalDecoder,
+} from "cbe-r";
 
-const structure = extractJavaStructure(capture, [100, 64, 100], [140, 100, 140], {
-  includeEntities: true,
-  unsupportedBlockPolicy: "barrier",
+const decoder: JournalDecoder = {
+  id: "bedrock-example",
+  versions: ["1.21.0"],
+  decode(record, context) {
+    // Decode record.params using context.protocolVersion.
+    return undefined;
+  },
+};
+
+const capture = decodeJournalToCapture(journalText, {
+  protocolVersion: "1.21.0",
+  decoders: [decoder],
+  strict: true,
 });
-
-const nbt = encodeJavaStructureGzip(structure);
 ```
 
-## Remaining protocol work
+## Current protocol boundary
 
-The live recorder preserves real server traffic, authentication events, disconnects, and packet payloads. Direct conversion of a packet journal to normalized blocks still requires version-aware decoding for `level_chunk`, `sub_chunk`, runtime palettes, and block-entity packet variants.
+The recorder preserves real server traffic and restores binary packet fields from the journal. Complete decoding of raw `level_chunk` and `sub_chunk` payload bytes still requires version-specific palette and subchunk decoders validated against real packet fixtures. Unsupported raw formats fail safely in strict mode instead of silently generating incorrect blocks.
 
-Conversion coverage is intentionally conservative. Unsupported stateful blocks are reported through barrier replacement or strict errors rather than silently producing an incorrect Java block.
+Only chunks delivered to the client can be represented.
+
+## Development
+
+Node.js 20 or newer is required only when building from source.
+
+```bash
+npm install
+npm run check
+npm run build
+```
 
 ## License
 

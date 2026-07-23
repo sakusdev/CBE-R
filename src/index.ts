@@ -11,6 +11,23 @@ export type {
 } from "./bedrock.js";
 export { captureBedrockSession, serializeJournalRecord } from "./live.js";
 export type { CaptureSummary, LiveCaptureOptions, PacketJournalRecord } from "./live.js";
+export {
+  decodeJournalToCapture,
+  extractChunkJournal,
+  hydrateJournalValue,
+  isChunkPacket,
+  normalizedPacketDecoder,
+  parseJournal,
+  parseJournalLine,
+  summarizeJournal,
+} from "./journal.js";
+export type {
+  DecodeContext,
+  DecodeJournalOptions,
+  JournalDecoder,
+  JournalPacketRecord,
+  JournalSummary,
+} from "./journal.js";
 export { encodeJavaStructure, encodeJavaStructureGzip } from "./nbt.js";
 export { extractJavaStructure, normalizeBounds, validateCaptureDocument } from "./world.js";
 export type { ExtractOptions } from "./world.js";
