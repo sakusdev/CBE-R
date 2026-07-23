@@ -6,25 +6,57 @@
 import { readFile, writeFile } from "node:fs/promises";
 import { basename } from "node:path";
 import process from "node:process";
+import { captureBedrockSession } from "./live.js";
 import { encodeJavaStructure, encodeJavaStructureGzip } from "./nbt.js";
 import type { CaptureDocument, Vec3 } from "./types.js";
 import { extractJavaStructure, validateCaptureDocument } from "./world.js";
 
-interface Arguments {
-  input: string;
-  output: string;
-  from: Vec3;
-  to: Vec3;
-  dataVersion: number;
-  compressed: boolean;
-  includeAir: boolean;
-  includeEntities: boolean;
-  unsupported: "barrier" | "air" | "throw";
+function usage(exitCode = 2): never {
+  console.error(`CBE-R
+
+Commands:
+  cbe-r export --input capture.json --output building.nbt --from x,y,z --to x,y,z [options]
+  cbe-r capture --host example.org --username ProfileName --output session.ndjson [options]
+
+Export options:
+  --data-version <number>       Java DataVersion (default: 3955)
+  --uncompressed                Write raw NBT instead of gzip NBT
+  --include-air                 Include captured air blocks
+  --include-entities            Include entities from the capture
+  --unsupported barrier|air|throw
+
+Capture options:
+  --port <number>               Bedrock UDP port (default: 19132)
+  --version <version>           Pin a Bedrock protocol version; default is auto
+  --offline                     Disable Microsoft/Xbox authentication
+  --profiles-folder <path>      Authentication token cache directory
+  --duration <seconds>          Stop automatically after N seconds
+  --connect-timeout <seconds>   Connection timeout (default: 15)
+  --raknet jsp-raknet|raknet-node|raknet-native
+
+  --help                        Show this help`);
+  process.exit(exitCode);
 }
 
-function usage(): never {
-  console.error(`Usage: cbe-r export --input capture.json --output building.nbt --from x,y,z --to x,y,z [options]\n\nOptions:\n  --data-version <number>       Java DataVersion (default: 3955)\n  --uncompressed                Write raw NBT instead of gzip NBT\n  --include-air                 Include captured air blocks\n  --include-entities            Include entities from the capture\n  --unsupported barrier|air|throw\n  --help                        Show this help`);
-  process.exit(2);
+function parseTokens(argv: readonly string[], booleanFlags: readonly string[]): {
+  readonly values: Map<string, string>;
+  readonly flags: Set<string>;
+} {
+  const values = new Map<string, string>();
+  const flags = new Set<string>();
+  for (let index = 0; index < argv.length; index += 1) {
+    const token = argv[index]!;
+    if (!token.startsWith("--")) throw new TypeError(`Unexpected argument: ${token}`);
+    if (booleanFlags.includes(token)) {
+      flags.add(token);
+      continue;
+    }
+    const value = argv[index + 1];
+    if (!value || value.startsWith("--")) throw new TypeError(`Missing value for ${token}`);
+    values.set(token, value);
+    index += 1;
+  }
+  return { values, flags };
 }
 
 function parseVec3(value: string | undefined, option: string): Vec3 {
@@ -35,23 +67,16 @@ function parseVec3(value: string | undefined, option: string): Vec3 {
   return [values[0]!, values[1]!, values[2]!];
 }
 
-function parseArguments(argv: readonly string[]): Arguments {
-  if (argv[0] !== "export" || argv.includes("--help")) usage();
-  const values = new Map<string, string>();
-  const flags = new Set<string>();
-  for (let index = 1; index < argv.length; index += 1) {
-    const token = argv[index]!;
-    if (!token.startsWith("--")) throw new TypeError(`Unexpected argument: ${token}`);
-    if (["--uncompressed", "--include-air", "--include-entities"].includes(token)) {
-      flags.add(token);
-      continue;
-    }
-    const value = argv[index + 1];
-    if (!value || value.startsWith("--")) throw new TypeError(`Missing value for ${token}`);
-    values.set(token, value);
-    index += 1;
+function positiveInteger(value: string | undefined, option: string, fallback?: number): number {
+  const parsed = value === undefined ? fallback : Number(value);
+  if (parsed === undefined || !Number.isInteger(parsed) || parsed <= 0) {
+    throw new TypeError(`${option} must be a positive integer`);
   }
+  return parsed;
+}
 
+async function exportCommand(argv: readonly string[]): Promise<void> {
+  const { values, flags } = parseTokens(argv, ["--uncompressed", "--include-air", "--include-entities"]);
   const input = values.get("--input");
   const output = values.get("--output");
   if (!input || !output) usage();
@@ -59,38 +84,56 @@ function parseArguments(argv: readonly string[]): Arguments {
   if (unsupported !== "barrier" && unsupported !== "air" && unsupported !== "throw") {
     throw new TypeError("--unsupported must be barrier, air, or throw");
   }
-  const dataVersion = Number(values.get("--data-version") ?? 3955);
-  if (!Number.isInteger(dataVersion) || dataVersion <= 0) throw new TypeError("--data-version must be a positive integer");
 
-  return {
-    input,
-    output,
-    from: parseVec3(values.get("--from"), "--from"),
-    to: parseVec3(values.get("--to"), "--to"),
-    dataVersion,
-    compressed: !flags.has("--uncompressed"),
+  const parsed: unknown = JSON.parse(await readFile(input, "utf8"));
+  validateCaptureDocument(parsed);
+  const document: CaptureDocument = parsed;
+  const structure = extractJavaStructure(document, parseVec3(values.get("--from"), "--from"), parseVec3(values.get("--to"), "--to"), {
+    dataVersion: positiveInteger(values.get("--data-version"), "--data-version", 3955),
     includeAir: flags.has("--include-air"),
     includeEntities: flags.has("--include-entities"),
-    unsupported,
-  };
+    unsupportedBlockPolicy: unsupported,
+  });
+  const encoded = flags.has("--uncompressed") ? encodeJavaStructure(structure) : encodeJavaStructureGzip(structure);
+  await writeFile(output, encoded);
+  const barriers = structure.blocks.filter(({ state }) => state.name === "minecraft:barrier").length;
+  console.log(`${basename(output)}: ${structure.blocks.length} blocks, ${structure.entities?.length ?? 0} entities, ${encoded.length} bytes`);
+  if (barriers > 0) console.warn(`Warning: ${barriers} unsupported block states were replaced with barriers`);
+}
+
+async function captureCommand(argv: readonly string[]): Promise<void> {
+  const { values, flags } = parseTokens(argv, ["--offline"]);
+  const host = values.get("--host");
+  const username = values.get("--username");
+  const output = values.get("--output");
+  if (!host || !username || !output) usage();
+  const raknet = values.get("--raknet") ?? "jsp-raknet";
+  if (raknet !== "jsp-raknet" && raknet !== "raknet-node" && raknet !== "raknet-native") {
+    throw new TypeError("--raknet must be jsp-raknet, raknet-node, or raknet-native");
+  }
+  const durationSeconds = values.has("--duration") ? positiveInteger(values.get("--duration"), "--duration") : undefined;
+  const summary = await captureBedrockSession({
+    host,
+    username,
+    output,
+    port: positiveInteger(values.get("--port"), "--port", 19132),
+    version: values.get("--version"),
+    offline: flags.has("--offline"),
+    profilesFolder: values.get("--profiles-folder"),
+    durationMs: durationSeconds === undefined ? undefined : durationSeconds * 1000,
+    connectTimeoutMs: positiveInteger(values.get("--connect-timeout"), "--connect-timeout", 15) * 1000,
+    raknetBackend: raknet,
+  });
+  console.log(`${basename(summary.output)}: ${summary.packets} packets captured (${summary.closeReason})`);
 }
 
 async function main(): Promise<void> {
-  const args = parseArguments(process.argv.slice(2));
-  const parsed: unknown = JSON.parse(await readFile(args.input, "utf8"));
-  validateCaptureDocument(parsed);
-  const document: CaptureDocument = parsed;
-  const structure = extractJavaStructure(document, args.from, args.to, {
-    dataVersion: args.dataVersion,
-    includeAir: args.includeAir,
-    includeEntities: args.includeEntities,
-    unsupportedBlockPolicy: args.unsupported,
-  });
-  const encoded = args.compressed ? encodeJavaStructureGzip(structure) : encodeJavaStructure(structure);
-  await writeFile(args.output, encoded);
-  const barriers = structure.blocks.filter(({ state }) => state.name === "minecraft:barrier").length;
-  console.log(`${basename(args.output)}: ${structure.blocks.length} blocks, ${structure.entities?.length ?? 0} entities, ${encoded.length} bytes`);
-  if (barriers > 0) console.warn(`Warning: ${barriers} unsupported block states were replaced with barriers`);
+  const argv = process.argv.slice(2);
+  if (argv.length === 0 || argv.includes("--help")) usage(argv.includes("--help") ? 0 : 2);
+  const command = argv[0];
+  if (command === "export") return exportCommand(argv.slice(1));
+  if (command === "capture") return captureCommand(argv.slice(1));
+  throw new TypeError(`Unknown command: ${command}`);
 }
 
 main().catch((error: unknown) => {
