@@ -1,0 +1,4 @@
+node_modules/
+dist/
+*.nbt
+.DS_Store
