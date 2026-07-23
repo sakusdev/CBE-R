@@ -10,8 +10,9 @@ export interface JavaBlockState {
 }
 
 export type NbtScalar = string | number | boolean;
-export type NbtValue = NbtScalar | readonly NbtValue[] | Readonly<Record<string, NbtValue>>;
-export type NbtCompound = Readonly<Record<string, NbtValue>>;
+export interface NbtList extends ReadonlyArray<NbtValue> {}
+export interface NbtCompound { readonly [key: string]: NbtValue; }
+export type NbtValue = NbtScalar | NbtList | NbtCompound;
 
 export interface StructureBlock {
   readonly pos: Vec3;
