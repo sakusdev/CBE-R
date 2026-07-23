@@ -15,11 +15,33 @@ CBE-R converts Minecraft Bedrock Edition block captures into Minecraft Java Edit
 - neighbor pass for stairs and connectable blocks
 - unsupported-block policies: barrier, air, or error
 - command-line export
-- GitHub Actions typecheck, test, package build, and artifact upload
+- authenticated/offline Bedrock packet recording to append-only NDJSON
+- GitHub Actions typecheck, test, npm package build, standalone executable build, checksums, and artifact upload
 
-## Requirements
+## Standalone executables
 
-Node.js 20 or newer.
+GitHub Actions builds binaries that include their own runtime, so end users do not need Node.js or Bun installed:
+
+- Windows x64: `cbe-r-windows-x64.exe`
+- Linux x64: `cbe-r-linux-x64`
+- Linux ARM64: `cbe-r-linux-arm64`
+- macOS Intel: `cbe-r-macos-x64`
+- macOS Apple Silicon: `cbe-r-macos-arm64`
+
+Download the `cbe-r-standalone` artifact from a successful **Standalone binaries** workflow run. Verify it against `SHA256SUMS.txt`, extract it, and run the executable directly.
+
+On Linux and macOS, make it executable if necessary:
+
+```bash
+chmod +x cbe-r-linux-x64
+./cbe-r-linux-x64 --help
+```
+
+The binaries are built with Bun's standalone compiler. The Linux x64 build uses the baseline target for compatibility with older x86-64 processors.
+
+## Development requirements
+
+Node.js 20 or newer is only required when building from source.
 
 ```bash
 npm install
@@ -29,7 +51,7 @@ npm run build
 
 ## Capture format
 
-CBE-R deliberately separates packet capture from conversion. Any permitted capture adapter can produce this stable JSON format:
+CBE-R uses this normalized JSON format between packet decoding and structure conversion:
 
 ```json
 {
@@ -66,8 +88,21 @@ Only chunks delivered to the client can be represented. A capture adapter must n
 
 ## CLI
 
+Capture a reproducible packet journal from a server:
+
 ```bash
-node dist/src/cli.js export \
+cbe-r capture \
+  --host example.org \
+  --port 19132 \
+  --username ProfileName \
+  --profiles-folder .auth \
+  --output session.ndjson
+```
+
+Export a normalized capture to Java Structure NBT:
+
+```bash
+cbe-r export \
   --input capture.json \
   --output building.nbt \
   --from 100,64,100 \
@@ -75,13 +110,7 @@ node dist/src/cli.js export \
   --include-entities
 ```
 
-Installed as a package, the command is `cbe-r`:
-
-```bash
-cbe-r export --input capture.json --output building.nbt --from 100,64,100 --to 140,100,140
-```
-
-Options:
+Export options:
 
 - `--data-version 3955`
 - `--uncompressed`
@@ -112,7 +141,7 @@ const nbt = encodeJavaStructureGzip(structure);
 
 ## Remaining protocol work
 
-A live Bedrock network adapter is not bundled yet. Bedrock login, encryption, compression, version negotiation, and subchunk packet decoding change across game versions and should be implemented as a separately versioned adapter. The conversion and export pipeline is ready to consume its normalized output.
+The live recorder preserves real server traffic, authentication events, disconnects, and packet payloads. Direct conversion of a packet journal to normalized blocks still requires version-aware decoding for `level_chunk`, `sub_chunk`, runtime palettes, and block-entity packet variants.
 
 Conversion coverage is intentionally conservative. Unsupported stateful blocks are reported through barrier replacement or strict errors rather than silently producing an incorrect Java block.
 
