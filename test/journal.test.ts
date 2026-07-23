@@ -10,6 +10,7 @@ import {
   parseJournalLine,
   summarizeJournal,
 } from "../src/journal.js";
+import { serializeJournalRecord } from "../src/live.js";
 
 const journal = [
   JSON.stringify({ event: "packet", name: "start_game", params: {} }),
@@ -36,8 +37,9 @@ test("extracts chunk-related packet records", () => {
   assert.equal(records[1]?.name, "sub_chunk");
 });
 
-test("hydrates Buffer and BigInt journal wrappers", () => {
+test("hydrates legacy Buffer and BigInt journal wrappers", () => {
   const record = parseJournalLine(JSON.stringify({
+    event: "packet",
     name: "level_chunk",
     params: {
       payload: { type: "Buffer", data: Buffer.from([1, 2, 3]).toString("base64") },
@@ -47,6 +49,52 @@ test("hydrates Buffer and BigInt journal wrappers", () => {
   const params = record.params as { payload: Buffer; runtimeId: bigint };
   assert.deepEqual(params.payload, Buffer.from([1, 2, 3]));
   assert.equal(params.runtimeId, 42n);
+});
+
+test("normalizes records emitted by the live recorder", () => {
+  const line = serializeJournalRecord({
+    type: "packet",
+    time: "2026-01-01T00:00:00.000Z",
+    name: "level_chunk",
+    data: {
+      payload: Buffer.from([1, 2, 3]),
+      runtimeId: 42n,
+      blocks: [{ pos: [1, 2, 3], block: { name: "minecraft:stone" } }],
+    },
+  });
+  const record = parseJournalLine(line);
+  const params = record.params as { payload: Buffer; runtimeId: bigint };
+  assert.equal(record.type, "packet");
+  assert.deepEqual(params.payload, Buffer.from([1, 2, 3]));
+  assert.equal(params.runtimeId, 42n);
+  assert.equal(extractChunkJournal(line).length, 1);
+  assert.equal(decodeJournalToCapture(line, { strict: true }).blocks.length, 1);
+});
+
+test("reads a pinned protocol version from the live journal header", () => {
+  const header = serializeJournalRecord({
+    type: "header",
+    time: "2026-01-01T00:00:00.000Z",
+    data: { requestedVersion: "1.21.80" },
+  });
+  const packet = serializeJournalRecord({
+    type: "packet",
+    time: "2026-01-01T00:00:01.000Z",
+    name: "level_chunk",
+    data: {},
+  });
+  let seenVersion: string | undefined;
+  decodeJournalToCapture(header + packet, {
+    decoders: [{
+      id: "version-probe",
+      versions: ["1.21.80"],
+      decode(_record, context) {
+        seenVersion = context.protocolVersion;
+        return undefined;
+      },
+    }],
+  });
+  assert.equal(seenVersion, "1.21.80");
 });
 
 test("decodes normalized block arrays from chunk packets", () => {

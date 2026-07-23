@@ -4,11 +4,15 @@
 
 import type { CaptureBlock, CaptureDocument, CaptureEntity } from "./types.js";
 
+type JournalRecordType = "header" | "event" | "packet" | "footer";
+
 export interface JournalPacketRecord {
+  readonly type?: JournalRecordType;
   readonly time?: string;
   readonly event?: string;
   readonly name?: string;
   readonly params?: unknown;
+  readonly data?: unknown;
   readonly version?: string;
   readonly [key: string]: unknown;
 }
@@ -50,32 +54,59 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
-/** Restores Buffer and BigInt wrappers emitted by serializeJournalRecord. */
+function isJournalRecordType(value: unknown): value is JournalRecordType {
+  return value === "header" || value === "event" || value === "packet" || value === "footer";
+}
+
+/** Restores Buffer, BigInt, and circular wrappers emitted by current and legacy recorders. */
 export function hydrateJournalValue(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(hydrateJournalValue);
   if (!isRecord(value)) return value;
 
-  if (value.type === "Buffer" && typeof value.data === "string") {
-    return Buffer.from(value.data, "base64");
-  }
-  if (value.type === "BigInt" && typeof value.data === "string") {
-    return BigInt(value.data);
-  }
+  if (typeof value.$buffer === "string") return Buffer.from(value.$buffer, "base64");
+  if (typeof value.$bigint === "string") return BigInt(value.$bigint);
+  if (value.$circular === true) return undefined;
+
+  if (value.type === "Buffer" && typeof value.data === "string") return Buffer.from(value.data, "base64");
+  if (value.type === "BigInt" && typeof value.data === "string") return BigInt(value.data);
   if (value.type === "Circular") return undefined;
 
-  return Object.fromEntries(
-    Object.entries(value).map(([key, entry]) => [key, hydrateJournalValue(entry)]),
-  );
+  return Object.fromEntries(Object.entries(value).map(([key, entry]) => [key, hydrateJournalValue(entry)]));
+}
+
+function normalizeJournalRecord(value: Record<string, unknown>): JournalPacketRecord {
+  const type = value.type;
+  const event = value.event;
+  const isPacket = type === "packet" || event === "packet";
+  const params = value.params ?? (isPacket ? value.data : undefined);
+
+  let version = typeof value.version === "string" ? value.version : undefined;
+  if (!version && type === "header" && isRecord(value.data)) {
+    const requestedVersion = value.data.requestedVersion;
+    if (typeof requestedVersion === "string" && requestedVersion !== "auto") version = requestedVersion;
+  }
+
+  return {
+    ...value,
+    ...(isJournalRecordType(type) ? { type } : {}),
+    ...(typeof event === "string" ? { event } : {}),
+    ...(params !== undefined ? { params } : {}),
+    ...(version ? { version } : {}),
+  };
 }
 
 export function parseJournalLine(line: string): JournalPacketRecord {
   const value: unknown = hydrateJournalValue(JSON.parse(line));
   if (!isRecord(value)) throw new TypeError("Journal line must contain a JSON object");
-  return value as JournalPacketRecord;
+  return normalizeJournalRecord(value);
+}
+
+function isPacketRecord(record: JournalPacketRecord): boolean {
+  return record.type === "packet" || record.event === "packet";
 }
 
 export function isChunkPacket(record: JournalPacketRecord): boolean {
-  return typeof record.name === "string" && CHUNK_PACKET_NAMES.has(record.name);
+  return isPacketRecord(record) && typeof record.name === "string" && CHUNK_PACKET_NAMES.has(record.name);
 }
 
 export function parseJournal(text: string, strict = false): JournalPacketRecord[] {
@@ -108,7 +139,7 @@ export function summarizeJournal(text: string): JournalSummary {
     records += 1;
     try {
       const record = parseJournalLine(line);
-      if (typeof record.name === "string") {
+      if (isPacketRecord(record) && typeof record.name === "string") {
         packets += 1;
         packetNames[record.name] = (packetNames[record.name] ?? 0) + 1;
         if (isChunkPacket(record)) chunkPackets += 1;
@@ -138,10 +169,6 @@ function validCaptureEntity(value: unknown): value is CaptureEntity {
     && isRecord(value.nbt);
 }
 
-/**
- * Decoder for adapters/fixtures that attach normalized `blocks` and `entities`
- * arrays directly to level_chunk or sub_chunk packet params.
- */
 export const normalizedPacketDecoder: JournalDecoder = {
   id: "normalized-packet-v1",
   versions: "*",
