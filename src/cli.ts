@@ -7,6 +7,7 @@ import { readFile, writeFile } from "node:fs/promises";
 import { basename } from "node:path";
 import process from "node:process";
 import { captureBedrockSession } from "./live.js";
+import type { LiveCaptureOptions } from "./live.js";
 import { encodeJavaStructure, encodeJavaStructureGzip } from "./nbt.js";
 import type { CaptureDocument, Vec3 } from "./types.js";
 import { extractJavaStructure, validateCaptureDocument } from "./world.js";
@@ -111,19 +112,23 @@ async function captureCommand(argv: readonly string[]): Promise<void> {
   if (raknet !== "jsp-raknet" && raknet !== "raknet-node" && raknet !== "raknet-native") {
     throw new TypeError("--raknet must be jsp-raknet, raknet-node, or raknet-native");
   }
-  const durationSeconds = values.has("--duration") ? positiveInteger(values.get("--duration"), "--duration") : undefined;
-  const summary = await captureBedrockSession({
+  const options: LiveCaptureOptions = {
     host,
     username,
     output,
     port: positiveInteger(values.get("--port"), "--port", 19132),
-    version: values.get("--version"),
     offline: flags.has("--offline"),
-    profilesFolder: values.get("--profiles-folder"),
-    durationMs: durationSeconds === undefined ? undefined : durationSeconds * 1000,
     connectTimeoutMs: positiveInteger(values.get("--connect-timeout"), "--connect-timeout", 15) * 1000,
     raknetBackend: raknet,
-  });
+  };
+  const version = values.get("--version");
+  const profilesFolder = values.get("--profiles-folder");
+  if (version !== undefined) Object.assign(options, { version });
+  if (profilesFolder !== undefined) Object.assign(options, { profilesFolder });
+  if (values.has("--duration")) {
+    Object.assign(options, { durationMs: positiveInteger(values.get("--duration"), "--duration") * 1000 });
+  }
+  const summary = await captureBedrockSession(options);
   console.log(`${basename(summary.output)}: ${summary.packets} packets captured (${summary.closeReason})`);
 }
 
