@@ -1,0 +1,90 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+name: Publish v0.3.0 release
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/publish-v0.3.0.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    name: Build and publish v0.3.0
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Build CLI and GUI executables
+        shell: bash
+        run: |
+          set -euxo pipefail
+          mkdir -p build release staging
+
+          bun build src/cli.ts --compile --target=bun-linux-x64-baseline --outfile build/cbe-r
+          bun build src/gui-main.ts --compile --target=bun-linux-x64-baseline --outfile build/cbe-r-gui
+          bun build src/cli.ts --compile --target=bun-linux-arm64 --outfile build/cbe-r-linux-arm64
+          bun build src/gui-main.ts --compile --target=bun-linux-arm64 --outfile build/cbe-r-gui-linux-arm64
+          bun build src/cli.ts --compile --target=bun-windows-x64 --outfile build/cbe-r.exe
+          bun build src/gui-main.ts --compile --target=bun-windows-x64 --outfile build/cbe-r-gui.exe
+          bun build src/cli.ts --compile --target=bun-darwin-x64 --outfile build/cbe-r-macos-x64
+          bun build src/gui-main.ts --compile --target=bun-darwin-x64 --outfile build/cbe-r-gui-macos-x64
+          bun build src/cli.ts --compile --target=bun-darwin-arm64 --outfile build/cbe-r-macos-arm64
+          bun build src/gui-main.ts --compile --target=bun-darwin-arm64 --outfile build/cbe-r-gui-macos-arm64
+
+          mkdir -p staging/linux-x64 staging/linux-arm64 staging/windows-x64 staging/macos-x64 staging/macos-arm64
+          cp build/cbe-r build/cbe-r-gui README.md LICENSE staging/linux-x64/
+          cp build/cbe-r-linux-arm64 staging/linux-arm64/cbe-r
+          cp build/cbe-r-gui-linux-arm64 staging/linux-arm64/cbe-r-gui
+          cp README.md LICENSE staging/linux-arm64/
+          cp build/cbe-r.exe build/cbe-r-gui.exe README.md LICENSE staging/windows-x64/
+          cp build/cbe-r-macos-x64 staging/macos-x64/cbe-r
+          cp build/cbe-r-gui-macos-x64 staging/macos-x64/cbe-r-gui
+          cp README.md LICENSE staging/macos-x64/
+          cp build/cbe-r-macos-arm64 staging/macos-arm64/cbe-r
+          cp build/cbe-r-gui-macos-arm64 staging/macos-arm64/cbe-r-gui
+          cp README.md LICENSE staging/macos-arm64/
+
+          tar -C staging/linux-x64 -czf release/cbe-r-v0.3.0-linux-x64.tar.gz .
+          tar -C staging/linux-arm64 -czf release/cbe-r-v0.3.0-linux-arm64.tar.gz .
+          (cd staging/windows-x64 && zip -9 -r ../../release/cbe-r-v0.3.0-windows-x64.zip .)
+          tar -C staging/macos-x64 -czf release/cbe-r-v0.3.0-macos-x64.tar.gz .
+          tar -C staging/macos-arm64 -czf release/cbe-r-v0.3.0-macos-arm64.tar.gz .
+
+          bun run build
+          npm pack --pack-destination release
+
+          cd release
+          sha256sum * > SHA256SUMS.txt
+          sha256sum --check SHA256SUMS.txt
+
+      - name: Create release and upload assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euxo pipefail
+          TAG=v0.3.0
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            gh release create "$TAG" \
+              --target "$GITHUB_SHA" \
+              --title "CBE-R v0.3.0" \
+              --notes "Initial usable release with CLI and local browser GUI. Includes Node-free standalone builds for Windows, Linux, and macOS. Use only on servers and builds you are authorized to copy."
+          fi
+          gh release upload "$TAG" release/* --clobber
