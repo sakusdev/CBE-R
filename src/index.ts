@@ -9,6 +9,8 @@ export type {
   ConvertBedrockOptions,
   UnsupportedBlockPolicy,
 } from "./bedrock.js";
+export { convertBedrockBlockEntity } from "./block-entity.js";
+export type { ConvertBlockEntityOptions } from "./block-entity.js";
 export { captureBedrockSession, serializeJournalRecord } from "./live.js";
 export type { CaptureSummary, LiveCaptureOptions, PacketJournalRecord } from "./live.js";
 export {
