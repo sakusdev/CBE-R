@@ -1,6 +1,6 @@
 {
   "name": "cbe-r",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "Capture Bedrock Edition structures and export them as Java Edition structure NBT.",
   "type": "module",
   "license": "MPL-2.0",
