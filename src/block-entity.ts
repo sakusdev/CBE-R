@@ -43,10 +43,20 @@ function convertCompound(value: Record<string, unknown>): NbtCompound {
   return output;
 }
 
+function normalizeIdentifier(value: string): string {
+  return value
+    .replace(/^minecraft:/u, "")
+    .replace(/^tile\./u, "")
+    .replace(/^item\./u, "")
+    .replace(/([a-z0-9])([A-Z])/gu, "$1_$2")
+    .replace(/[\s.-]+/gu, "_")
+    .toLowerCase();
+}
+
 function namespaced(value: unknown): string | undefined {
   if (typeof value !== "string" || value.length === 0) return undefined;
-  const normalized = value.replace(/^tile\./u, "").replace(/^item\./u, "").toLowerCase();
-  return normalized.includes(":") ? normalized : `minecraft:${normalized}`;
+  const normalized = normalizeIdentifier(value);
+  return `minecraft:${normalized}`;
 }
 
 function jsonText(value: unknown): string {
@@ -74,8 +84,8 @@ function convertItem(value: unknown, slotFallback?: number): NbtCompound | undef
   if (isCompound(tagSource)) {
     const display = tagSource.display;
     if (isCompound(display) && typeof display.Name === "string") components["minecraft:custom_name"] = jsonText(display.Name);
-    if (Array.isArray(display && isCompound(display) ? display.Lore : undefined)) {
-      components["minecraft:lore"] = (display as Record<string, unknown>).Lore as unknown as NbtValue;
+    if (isCompound(display) && Array.isArray(display.Lore)) {
+      components["minecraft:lore"] = display.Lore.map((line) => jsonText(line));
     }
     const ench = tagSource.ench ?? tagSource.Enchantments;
     if (Array.isArray(ench)) components["minecraft:enchantments"] = ench.map((entry) => convertCompound(isCompound(entry) ? entry : {}));
@@ -92,8 +102,9 @@ function convertItems(value: unknown): readonly NbtValue[] | undefined {
 
 function sourceId(source: Record<string, unknown>): string {
   const raw = source.id ?? source.Id ?? source.identifier ?? source.type;
-  const simple = typeof raw === "string" ? raw.replace(/^minecraft:/u, "").toLowerCase() : "";
-  return ID_ALIASES[simple] ?? namespaced(raw) ?? "minecraft:unknown";
+  if (typeof raw !== "string") return "minecraft:unknown";
+  const simple = normalizeIdentifier(raw);
+  return ID_ALIASES[simple] ?? `minecraft:${simple}`;
 }
 
 function copyKnown(source: Record<string, unknown>, target: Record<string, NbtValue>, keys: readonly string[]): void {
@@ -185,7 +196,8 @@ export function convertBedrockBlockEntity(source: NbtCompound, options: ConvertB
     if (book) target.Book = book;
     if (typeof raw.page === "number") target.Page = raw.page;
   } else if (id === "minecraft:flower_pot") {
-    const item = namespaced(raw.PlantBlock?.toString() ?? raw.Item ?? raw.PlantBlock);
+    const plant = raw.PlantBlock ?? raw.Item;
+    const item = typeof plant === "string" ? namespaced(plant) : isCompound(plant) ? namespaced(plant.name ?? plant.Name) : undefined;
     if (item) target.item = item;
   } else if (id === "minecraft:decorated_pot") {
     const sherds = raw.sherds ?? raw.Sherds;
@@ -209,7 +221,7 @@ export function convertBedrockBlockEntity(source: NbtCompound, options: ConvertB
     copyKnown(raw, target, ["CookingTimes", "CookingTotalTimes"]);
   } else if (id === "minecraft:end_gateway") {
     copyKnown(raw, target, ["Age", "ExactTeleport"]);
-    if (Array.isArray(raw.ExitPortal)) target.ExitPortal = raw.ExitPortal as unknown as NbtValue;
+    if (Array.isArray(raw.ExitPortal)) target.ExitPortal = raw.ExitPortal.map((entry) => typeof entry === "number" ? entry : 0);
   } else if (id === "minecraft:structure_block") {
     copyKnown(raw, target, ["name", "author", "metadata", "posX", "posY", "posZ", "sizeX", "sizeY", "sizeZ", "rotation", "mirror", "mode", "integrity", "seed", "ignoreEntities", "showboundingbox"]);
   } else if (id === "minecraft:jigsaw") {
