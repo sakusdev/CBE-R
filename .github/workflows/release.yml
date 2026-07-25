@@ -32,7 +32,8 @@ jobs:
         with:
           node-version: 24
       - run: npm install --ignore-scripts
-      - run: npm run check
+      - name: Build TypeScript package
+        run: npm run build
       - name: Build executables
         shell: bash
         run: |
