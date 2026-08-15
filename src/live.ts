@@ -43,6 +43,7 @@ export interface PacketJournalRecord {
   readonly time: string;
   readonly name?: string;
   readonly data?: unknown;
+  readonly version?: string;
 }
 
 function jsonSafe(value: unknown, seen = new WeakSet<object>()): unknown {
@@ -55,6 +56,12 @@ function jsonSafe(value: unknown, seen = new WeakSet<object>()): unknown {
   const output: Record<string, unknown> = {};
   for (const [key, entry] of Object.entries(value)) output[key] = jsonSafe(entry, seen);
   return output;
+}
+
+function advertisedVersion(value: unknown): string | undefined {
+  if (!value || typeof value !== "object" || !("version" in value)) return undefined;
+  const version = (value as { readonly version?: unknown }).version;
+  return typeof version === "string" && version.length > 0 ? version : undefined;
 }
 
 export function serializeJournalRecord(record: PacketJournalRecord): string {
@@ -114,6 +121,7 @@ export async function captureBedrockSession(options: LiveCaptureOptions): Promis
   let settled = false;
   let closeReason = "closed";
   let timeout: NodeJS.Timeout | undefined;
+  let negotiatedVersion = options.version;
 
   return await new Promise<CaptureSummary>((resolvePromise, rejectPromise) => {
     const client = bedrock.createClient(clientOptions);
@@ -125,7 +133,7 @@ export async function captureBedrockSession(options: LiveCaptureOptions): Promis
       if (timeout) clearTimeout(timeout);
       const endedAt = new Date().toISOString();
       try {
-        await writer.append({ type: "footer", time: endedAt, data: { packets, closeReason } });
+        await writer.append({ type: "footer", time: endedAt, data: { packets, closeReason }, ...(negotiatedVersion ? { version: negotiatedVersion } : {}) });
         await writer.flush();
       } catch (writeError) {
         rejectPromise(writeError);
@@ -139,27 +147,28 @@ export async function captureBedrockSession(options: LiveCaptureOptions): Promis
     };
 
     client.on("status", (status) => {
-      void writer.append({ type: "event", time: new Date().toISOString(), name: "status", data: status });
+      negotiatedVersion ??= advertisedVersion(status);
+      void writer.append({ type: "event", time: new Date().toISOString(), name: "status", data: status, ...(negotiatedVersion ? { version: negotiatedVersion } : {}) });
     });
     client.on("join", () => {
-      void writer.append({ type: "event", time: new Date().toISOString(), name: "join" });
+      void writer.append({ type: "event", time: new Date().toISOString(), name: "join", ...(negotiatedVersion ? { version: negotiatedVersion } : {}) });
     });
     client.on("spawn", () => {
-      void writer.append({ type: "event", time: new Date().toISOString(), name: "spawn" });
+      void writer.append({ type: "event", time: new Date().toISOString(), name: "spawn", ...(negotiatedVersion ? { version: negotiatedVersion } : {}) });
     });
     client.on("packet", (packet, meta) => {
       packets += 1;
       const packetName = typeof meta === "object" && meta !== null && "name" in meta
         ? String((meta as { name: unknown }).name)
         : "unknown";
-      void writer.append({ type: "packet", time: new Date().toISOString(), name: packetName, data: packet });
+      void writer.append({ type: "packet", time: new Date().toISOString(), name: packetName, data: packet, ...(negotiatedVersion ? { version: negotiatedVersion } : {}) });
     });
     client.on("kick", (reason) => {
-      void writer.append({ type: "event", time: new Date().toISOString(), name: "kick", data: reason });
+      void writer.append({ type: "event", time: new Date().toISOString(), name: "kick", data: reason, ...(negotiatedVersion ? { version: negotiatedVersion } : {}) });
       void finish("kick");
     });
     client.on("error", (error) => {
-      void writer.append({ type: "event", time: new Date().toISOString(), name: "error", data: error });
+      void writer.append({ type: "event", time: new Date().toISOString(), name: "error", data: error, ...(negotiatedVersion ? { version: negotiatedVersion } : {}) });
       void finish("error", error);
     });
     client.on("close", () => void finish(closeReason));
