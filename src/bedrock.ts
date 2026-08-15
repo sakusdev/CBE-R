@@ -31,6 +31,9 @@ function facing(states: Readonly<Record<string, BedrockStateValue>>): string {
   const direction = Number(states.direction ?? states.cardinal_direction);
   return CARDINAL_DIRECTIONS[direction] ?? text(states, "minecraft:cardinal_direction", "facing_direction") ?? "north";
 }
+function waterlogged(states: Readonly<Record<string, BedrockStateValue>>): string {
+  return String(bool(states.waterlogged_bit ?? states.waterlogged));
+}
 function unsupported(block: BedrockBlockState, policy: UnsupportedBlockPolicy): JavaBlockState {
   if (policy === "throw") throw new Error(`Unsupported Bedrock block state: ${block.name}`);
   return { name: policy === "air" ? "minecraft:air" : "minecraft:barrier" };
@@ -53,20 +56,20 @@ export function convertBedrockBlockState(block: BedrockBlockState, options: Conv
   }
   if (name.endsWith("_slab")) {
     const half = text(states, "minecraft:vertical_half", "vertical_half") ?? "bottom";
-    return { name, properties: { type: bool(states.double_slab_bit) ? "double" : half === "top" ? "top" : "bottom", waterlogged: "false" } };
+    return { name, properties: { type: bool(states.double_slab_bit) ? "double" : half === "top" ? "top" : "bottom", waterlogged: waterlogged(states) } };
   }
   if (name.endsWith("_stairs")) {
     const stairFacing = STAIR_DIRECTIONS[Number(states.weirdo_direction)] ?? "north";
-    return { name, properties: { facing: stairFacing, half: bool(states.upside_down_bit) ? "top" : "bottom", shape: "straight", waterlogged: "false" } };
+    return { name, properties: { facing: stairFacing, half: bool(states.upside_down_bit) ? "top" : "bottom", shape: "straight", waterlogged: waterlogged(states) } };
   }
   if (name.endsWith("_door")) {
     return { name, properties: { facing: facing(states), half: bool(states.upper_block_bit) ? "upper" : "lower", hinge: bool(states.door_hinge_bit) ? "right" : "left", open: String(bool(states.open_bit)), powered: String(bool(states.powered_bit)) } };
   }
   if (name.endsWith("_trapdoor")) {
-    return { name, properties: { facing: facing(states), half: bool(states.upside_down_bit) ? "top" : "bottom", open: String(bool(states.open_bit)), powered: String(bool(states.powered_bit)), waterlogged: "false" } };
+    return { name, properties: { facing: facing(states), half: bool(states.upside_down_bit) ? "top" : "bottom", open: String(bool(states.open_bit)), powered: String(bool(states.powered_bit)), waterlogged: waterlogged(states) } };
   }
   if (name.endsWith("_fence") || name.endsWith("_wall") || name === "minecraft:iron_bars" || name.endsWith("_pane")) {
-    const properties: Record<string, string> = { north: "false", east: "false", south: "false", west: "false", waterlogged: "false" };
+    const properties: Record<string, string> = { north: "false", east: "false", south: "false", west: "false", waterlogged: waterlogged(states) };
     if (name.endsWith("_wall")) properties.up = "true";
     return { name, properties };
   }
@@ -77,11 +80,11 @@ export function convertBedrockBlockState(block: BedrockBlockState, options: Conv
     if (name.includes("chest")) properties.type = "single";
     return { name, properties };
   }
-  if (name.endsWith("_sign") || name.endsWith("_hanging_sign")) return { name, properties: { rotation: String(Number(states.ground_sign_direction ?? 0) & 15), waterlogged: "false" } };
-  if (name.endsWith("_wall_sign") || name.endsWith("_wall_hanging_sign")) return { name, properties: { facing: facing(states), waterlogged: "false" } };
+  if (name.endsWith("_sign") || name.endsWith("_hanging_sign")) return { name, properties: { rotation: String(Number(states.ground_sign_direction ?? 0) & 15), waterlogged: waterlogged(states) } };
+  if (name.endsWith("_wall_sign") || name.endsWith("_wall_hanging_sign")) return { name, properties: { facing: facing(states), waterlogged: waterlogged(states) } };
   if (name === "minecraft:water" || name === "minecraft:flowing_water") return { name: "minecraft:water", properties: { level: String(Number(states.liquid_depth ?? 0) & 15) } };
-  if (name === "minecraft:lava" || name === "minecraft:flowing_lava") return { name: "minecraft:lava", properties: { level: String(Number(states.liquid_depth ?? 0) & 15) } };
-  if (name.endsWith("_leaves") || name.endsWith("_leaves2")) return { name: name.replace("_leaves2", "_leaves") as `minecraft:${string}`, properties: { distance: "7", persistent: String(bool(states.persistent_bit)), waterlogged: "false" } };
+  if (name === "minecraft:lava" || name === "minecraft:flowing_lava") return { name: "minecraft:lava", properties: { level: String(Number(states.liquid_depth ?? 0) & 15) };
+  if (name.endsWith("_leaves") || name.endsWith("_leaves2")) return { name: name.replace("_leaves2", "_leaves") as `minecraft:${string}`, properties: { distance: "7", persistent: String(bool(states.persistent_bit)), waterlogged: waterlogged(states) } };
   if (name.endsWith("_sapling")) return { name, properties: { stage: bool(states.age_bit) ? "1" : "0" } };
   if (name === "minecraft:snow_layer") return { name: "minecraft:snow", properties: { layers: String(Math.min(8, Number(states.height ?? 0) + 1)) } };
   if (Object.keys(states).length === 0) return { name };
