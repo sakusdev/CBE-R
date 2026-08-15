@@ -30,6 +30,12 @@ export type {
   JournalPacketRecord,
   JournalSummary,
 } from "./journal.js";
+export {
+  createRuntimeBlockResolver,
+  decodeRuntimeSubChunk,
+  rawBedrockChunkDecoder,
+} from "./raw-chunk.js";
+export type { DecodedRuntimeSubChunk, RuntimeBlockResolver } from "./raw-chunk.js";
 export { encodeJavaStructure, encodeJavaStructureGzip } from "./nbt.js";
 export { captureBounds, regionFilename, splitBounds } from "./planning.js";
 export type { StructureRegion } from "./planning.js";
