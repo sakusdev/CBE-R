@@ -93,6 +93,7 @@ export async function captureBedrockSession(options: LiveCaptureOptions): Promis
       port: options.port ?? 19132,
       requestedVersion: options.version ?? "auto",
       offline: options.offline ?? false,
+      chunkCaching: false,
     },
   });
 
@@ -104,6 +105,7 @@ export async function captureBedrockSession(options: LiveCaptureOptions): Promis
     offline: options.offline ?? false,
     connectTimeout: options.connectTimeoutMs ?? 15_000,
     raknetBackend: options.raknetBackend ?? "jsp-raknet",
+    enableChunkCaching: false,
   };
   if (options.version) clientOptions.version = options.version;
   if (options.profilesFolder) clientOptions.profilesFolder = resolve(options.profilesFolder);
