@@ -8,6 +8,11 @@ CBE-R records Minecraft Bedrock Edition client traffic and converts authorized b
 
 - authenticated or offline Bedrock packet recording to append-only NDJSON
 - packet journal validation, statistics, Buffer/BigInt restoration, and chunk-packet extraction
+- raw network-runtime Bedrock subchunk decoding for subchunk formats 1, 8, and 9
+- runtime block-ID resolution through versioned Prismarine Bedrock registries
+- secondary block-storage water detection and waterlogged-state preservation
+- automatic disabling of client chunk caching for self-contained captures
+- automatic persistence of the server version advertised during version negotiation
 - pluggable protocol decoder registry
 - normalized packet/fixture decoder and CaptureDocument generation
 - direct journal-to-NBT pipeline command
@@ -47,6 +52,8 @@ cbe-r capture \
   --profiles-folder .auth \
   --output session.ndjson
 ```
+
+New captures disable Bedrock client chunk caching so the recorded chunk payloads remain self-contained. When version auto-detection is used, the server-advertised version is stored in the journal for later runtime-palette resolution.
 
 Inspect the journal before decoding:
 
@@ -128,7 +135,7 @@ The stable conversion boundary is:
 }
 ```
 
-Packet adapters and version decoders may attach normalized `blocks` and `entities` arrays to `level_chunk` or `sub_chunk` records. The built-in normalized decoder merges those records, applies last-write-wins behavior by block coordinate, and emits this format.
+The built-in decoders accept either already-normalized `blocks` / `entities` arrays or raw network-runtime `level_chunk` / `subchunk` payloads. Decoded records are merged with last-write-wins behavior by block coordinate.
 
 ## Decoder API
 
@@ -156,7 +163,11 @@ const capture = decodeJournalToCapture(journalText, {
 
 ## Current protocol boundary
 
-The recorder preserves real server traffic and restores binary packet fields from the journal. Complete decoding of raw `level_chunk` and `sub_chunk` payload bytes still requires version-specific palette and subchunk decoders validated against real packet fixtures. Unsupported raw formats fail safely in strict mode instead of silently generating incorrect blocks.
+CBE-R decodes the network-runtime paletted subchunk formats used by Bedrock subchunk versions 1, 8, and 9 and resolves their runtime block IDs against versioned Bedrock registries. Unsupported subchunk formats fail explicitly instead of silently generating incorrect blocks.
+
+Legacy or externally produced journals that contain cache-enabled `level_chunk` / `subchunk` packets still require cache-blob reconstruction and are rejected by the raw decoder. CBE-R's own recorder disables chunk caching, so newly recorded journals do not depend on those external blobs.
+
+Raw chunk decoding currently reconstructs block states. Block-entity NBT and separately streamed actors/entities are preserved when supplied by normalized adapters, but are not yet reconstructed from the trailing/raw entity packet streams by the built-in raw decoder.
 
 Only chunks delivered to the client can be represented.
 
