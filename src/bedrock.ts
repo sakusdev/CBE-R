@@ -83,7 +83,7 @@ export function convertBedrockBlockState(block: BedrockBlockState, options: Conv
   if (name.endsWith("_sign") || name.endsWith("_hanging_sign")) return { name, properties: { rotation: String(Number(states.ground_sign_direction ?? 0) & 15), waterlogged: waterlogged(states) } };
   if (name.endsWith("_wall_sign") || name.endsWith("_wall_hanging_sign")) return { name, properties: { facing: facing(states), waterlogged: waterlogged(states) } };
   if (name === "minecraft:water" || name === "minecraft:flowing_water") return { name: "minecraft:water", properties: { level: String(Number(states.liquid_depth ?? 0) & 15) } };
-  if (name === "minecraft:lava" || name === "minecraft:flowing_lava") return { name: "minecraft:lava", properties: { level: String(Number(states.liquid_depth ?? 0) & 15) };
+  if (name === "minecraft:lava" || name === "minecraft:flowing_lava") return { name: "minecraft:lava", properties: { level: String(Number(states.liquid_depth ?? 0) & 15) } };
   if (name.endsWith("_leaves") || name.endsWith("_leaves2")) return { name: name.replace("_leaves2", "_leaves") as `minecraft:${string}`, properties: { distance: "7", persistent: String(bool(states.persistent_bit)), waterlogged: waterlogged(states) } };
   if (name.endsWith("_sapling")) return { name, properties: { stage: bool(states.age_bit) ? "1" : "0" } };
   if (name === "minecraft:snow_layer") return { name: "minecraft:snow", properties: { layers: String(Math.min(8, Number(states.height ?? 0) + 1)) } };
