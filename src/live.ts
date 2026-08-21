@@ -9,6 +9,7 @@ import { dirname, resolve } from "node:path";
 const require = createRequire(import.meta.url);
 
 interface LooseClient {
+  readonly options?: { readonly version?: unknown };
   on(event: string, listener: (...args: unknown[]) => void): this;
   close(): void;
 }
@@ -58,10 +59,11 @@ function jsonSafe(value: unknown, seen = new WeakSet<object>()): unknown {
   return output;
 }
 
-function advertisedVersion(value: unknown): string | undefined {
-  if (!value || typeof value !== "object" || !("version" in value)) return undefined;
-  const version = (value as { readonly version?: unknown }).version;
-  return typeof version === "string" && version.length > 0 ? version : undefined;
+function negotiatedClientVersion(client: LooseClient): string | undefined {
+  const version = client.options?.version;
+  if (typeof version === "string" && version.length > 0) return version;
+  if (typeof version === "number" && Number.isFinite(version)) return String(version);
+  return undefined;
 }
 
 export function serializeJournalRecord(record: PacketJournalRecord): string {
@@ -146,8 +148,12 @@ export async function captureBedrockSession(options: LiveCaptureOptions): Promis
       }
     };
 
+    // createClient resolves auto-versioning from the server ping before emitting connect_allowed.
+    client.on("connect_allowed", () => {
+      negotiatedVersion ??= negotiatedClientVersion(client);
+      void writer.append({ type: "event", time: new Date().toISOString(), name: "connect_allowed", ...(negotiatedVersion ? { version: negotiatedVersion } : {}) });
+    });
     client.on("status", (status) => {
-      negotiatedVersion ??= advertisedVersion(status);
       void writer.append({ type: "event", time: new Date().toISOString(), name: "status", data: status, ...(negotiatedVersion ? { version: negotiatedVersion } : {}) });
     });
     client.on("join", () => {
@@ -158,6 +164,7 @@ export async function captureBedrockSession(options: LiveCaptureOptions): Promis
     });
     client.on("packet", (packet, meta) => {
       packets += 1;
+      negotiatedVersion ??= negotiatedClientVersion(client);
       const packetName = typeof meta === "object" && meta !== null && "name" in meta
         ? String((meta as { name: unknown }).name)
         : "unknown";
