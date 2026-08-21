@@ -57,8 +57,12 @@ jobs:
             test -s "$binary"
             file "$binary" | grep -q "ELF 64-bit"
           done
-          release/cbe-r-linux-x64 --help 2>&1 | grep -q "CBE-R"
-          release/cbe-r-gui-linux-x64 --help 2>&1 | grep -q "Usage: cbe-r-gui"
+          cli_help="$(release/cbe-r-linux-x64 --help 2>&1)"
+          printf '%s\n' "$cli_help"
+          grep -q "CBE-R" <<<"$cli_help"
+          gui_help="$(release/cbe-r-gui-linux-x64 --help 2>&1)"
+          printf '%s\n' "$gui_help"
+          grep -q "Usage: cbe-r-gui" <<<"$gui_help"
 
       - name: Generate and verify checksums
         shell: bash
