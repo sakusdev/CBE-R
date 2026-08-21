@@ -58,7 +58,7 @@ interface CoverageSummary {
 interface CaptureInspection {
   readonly summary: ReturnType<typeof summarizeJournal>;
   readonly bounds?: readonly [min: Vec3, max: Vec3];
-  readonly coverage?: CoverageSummary;
+  readonly coverage?: CoverageSummary | undefined;
   readonly blocks?: number;
   readonly entities?: number;
   readonly decodeError?: string;
