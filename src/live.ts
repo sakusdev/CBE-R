@@ -44,7 +44,7 @@ export interface LiveCaptureSession {
   readonly output: string;
   readonly startedAt: string;
   readonly packets: number;
-  readonly version?: string;
+  readonly version: string | undefined;
   readonly done: Promise<CaptureSummary>;
   stop(reason?: string): void;
 }
