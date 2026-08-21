@@ -22,11 +22,29 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          expected=(
+            cbe-r-0.6.1.tgz
+            cbe-r-linux-x64
+            cbe-r-linux-arm64
+            cbe-r-macos-x64
+            cbe-r-macos-arm64
+            cbe-r-windows-x64.exe
+            cbe-r-gui-linux-x64
+            cbe-r-gui-linux-arm64
+            cbe-r-gui-macos-x64
+            cbe-r-gui-macos-arm64
+            cbe-r-gui-windows-x64.exe
+            SHA256SUMS.txt
+          )
           rm -f release-v0.6.1.ok
           for attempt in $(seq 1 30); do
             if gh release view v0.6.1 --repo "$GITHUB_REPOSITORY" --json url,assets > /tmp/release.json 2>/dev/null; then
-              count="$(jq '.assets | length' /tmp/release.json)"
-              if [ "$count" -eq 12 ]; then
+              jq -r '.assets[].name' /tmp/release.json | sort -u > /tmp/names.txt
+              missing=0
+              for name in "${expected[@]}"; do
+                if ! grep -Fxq "$name" /tmp/names.txt; then missing=1; fi
+              done
+              if [ "$missing" -eq 0 ]; then
                 jq -r '.url' /tmp/release.json > release-v0.6.1.ok
                 jq -r '.assets[] | "\(.name)\t\(.size)"' /tmp/release.json | sort >> release-v0.6.1.ok
                 break
@@ -35,10 +53,6 @@ jobs:
             sleep 10
           done
           test -s release-v0.6.1.ok
-          grep -q $'^cbe-r-gui-windows-x64.exe\t' release-v0.6.1.ok
-          grep -q $'^cbe-r-windows-x64.exe\t' release-v0.6.1.ok
-          grep -q $'^cbe-r-0.6.1.tgz\t' release-v0.6.1.ok
-          grep -q $'^SHA256SUMS.txt\t' release-v0.6.1.ok
       - name: Record verification
         shell: bash
         run: |
