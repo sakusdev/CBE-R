@@ -4,7 +4,7 @@
 
 import assert from "node:assert/strict";
 import test from "node:test";
-import { serializeJournalRecord } from "../src/live.js";
+import { normalizePacketEvent, serializeJournalRecord } from "../src/live.js";
 
 test("serializes buffers and bigint values in packet journals", () => {
   const line = serializeJournalRecord({
@@ -25,4 +25,24 @@ test("marks circular packet objects instead of crashing", () => {
   packet.self = packet;
   const line = serializeJournalRecord({ type: "packet", time: "now", data: packet });
   assert.match(line, /\$circular/);
+});
+
+test("normalizes current bedrock-protocol deserializer packet events", () => {
+  const normalized = normalizePacketEvent({
+    data: {
+      name: "level_chunk",
+      params: { x: 3, z: -4, payload: Buffer.from([9]) },
+    },
+    metadata: { size: 123 },
+  });
+  assert.equal(normalized.name, "level_chunk");
+  assert.deepEqual(normalized.data, { x: 3, z: -4, payload: Buffer.from([9]) });
+});
+
+test("keeps compatibility with legacy packet/meta events", () => {
+  const packet = { x: 1, z: 2 };
+  assert.deepEqual(normalizePacketEvent(packet, { name: "level_chunk" }), {
+    name: "level_chunk",
+    data: packet,
+  });
 });

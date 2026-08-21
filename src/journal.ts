@@ -2,6 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
+import { rawBedrockChunkDecoder } from "./raw-chunk.js";
 import type { CaptureBlock, CaptureDocument, CaptureEntity } from "./types.js";
 
 type JournalRecordType = "header" | "event" | "packet" | "footer";
@@ -44,6 +45,7 @@ export interface DecodeJournalOptions {
 
 const CHUNK_PACKET_NAMES = new Set([
   "level_chunk",
+  "subchunk",
   "sub_chunk",
   "sub_chunk_request",
   "client_cache_blob_status",
@@ -190,7 +192,7 @@ export function decodeJournalToCapture(text: string, options: DecodeJournalOptio
   const records = parseJournal(text, options.strict ?? false);
   const protocolVersion = options.protocolVersion
     ?? records.find((record) => typeof record.version === "string")?.version;
-  const decoders = options.decoders ?? [normalizedPacketDecoder];
+  const decoders = options.decoders ?? [normalizedPacketDecoder, rawBedrockChunkDecoder];
   const blocks = new Map<string, CaptureBlock>();
   const entities: CaptureEntity[] = [];
   const context: DecodeContext = {
@@ -211,7 +213,9 @@ export function decodeJournalToCapture(text: string, options: DecodeJournalOptio
   }
 
   if (blocks.size === 0 && entities.length === 0 && (options.strict ?? false)) {
-    throw new Error("No supported chunk data was decoded from the journal");
+    throw new Error(protocolVersion
+      ? "No supported chunk data was decoded from the journal"
+      : "No supported chunk data was decoded from the journal; pin the Bedrock version with --version when the journal header used auto-detection");
   }
 
   return {

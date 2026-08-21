@@ -11,8 +11,8 @@ export type {
 } from "./bedrock.js";
 export { convertBedrockBlockEntity } from "./block-entity.js";
 export type { ConvertBlockEntityOptions } from "./block-entity.js";
-export { captureBedrockSession, serializeJournalRecord } from "./live.js";
-export type { CaptureSummary, LiveCaptureOptions, PacketJournalRecord } from "./live.js";
+export { captureBedrockSession, normalizePacketEvent, serializeJournalRecord, startBedrockCapture } from "./live.js";
+export type { CaptureSummary, LiveCaptureOptions, LiveCaptureSession, PacketJournalRecord } from "./live.js";
 export {
   decodeJournalToCapture,
   extractChunkJournal,
@@ -30,6 +30,12 @@ export type {
   JournalPacketRecord,
   JournalSummary,
 } from "./journal.js";
+export {
+  createRuntimeBlockResolver,
+  decodeRuntimeSubChunk,
+  rawBedrockChunkDecoder,
+} from "./raw-chunk.js";
+export type { DecodedRuntimeSubChunk, RuntimeBlockResolver } from "./raw-chunk.js";
 export { encodeJavaStructure, encodeJavaStructureGzip } from "./nbt.js";
 export { captureBounds, regionFilename, splitBounds } from "./planning.js";
 export type { StructureRegion } from "./planning.js";
