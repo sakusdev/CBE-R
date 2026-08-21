@@ -57,7 +57,12 @@ jobs:
             test -s "$binary"
             file "$binary" | grep -q "ELF 64-bit"
           done
-          release/cbe-r-gui-linux-x64 --help | grep -q "Usage: cbe-r-gui"
+          cli_help="$(release/cbe-r-linux-x64 --help 2>&1)"
+          printf '%s\n' "$cli_help"
+          grep -q "CBE-R" <<<"$cli_help"
+          gui_help="$(release/cbe-r-gui-linux-x64 --help 2>&1)"
+          printf '%s\n' "$gui_help"
+          grep -q "Usage: cbe-r-gui" <<<"$gui_help"
 
       - name: Generate and verify checksums
         shell: bash
@@ -72,3 +77,41 @@ jobs:
           name: cbe-r-standalone
           path: release/*
           if-no-files-found: error
+
+  smoke-windows:
+    name: Smoke-test Windows executables
+    runs-on: windows-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Build Windows executables
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force release | Out-Null
+          bun build src/cli.ts --compile --target=bun-windows-x64 --outfile release/cbe-r-windows-x64.exe
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          bun build src/gui-cli.ts --compile --target=bun-windows-x64 --outfile release/cbe-r-gui-windows-x64.exe
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Execute Windows CLI and GUI
+        shell: pwsh
+        run: |
+          $cli = (& .\release\cbe-r-windows-x64.exe --help 2>&1 | Out-String)
+          if ($LASTEXITCODE -ne 0) { Write-Host $cli; exit $LASTEXITCODE }
+          Write-Host $cli
+          if ($cli -notmatch 'CBE-R') { throw 'CLI help did not start correctly' }
+
+          $gui = (& .\release\cbe-r-gui-windows-x64.exe --help 2>&1 | Out-String)
+          if ($LASTEXITCODE -ne 0) { Write-Host $gui; exit $LASTEXITCODE }
+          Write-Host $gui
+          if ($gui -notmatch 'Usage: cbe-r-gui') { throw 'GUI help did not start correctly' }
