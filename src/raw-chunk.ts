@@ -2,12 +2,11 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-import { createRequire } from "node:module";
+import prismarineBlockLoader from "prismarine-block";
+import prismarineRegistryFactory from "prismarine-registry";
 import type { BedrockBlockState, BedrockStateValue } from "./bedrock.js";
 import type { JournalDecoder, JournalPacketRecord } from "./journal.js";
 import type { CaptureBlock, CaptureDocument } from "./types.js";
-
-const require = createRequire(import.meta.url);
 
 interface RegistryBlock {
   readonly stateId?: number;
@@ -37,6 +36,9 @@ interface PrismarineBlockFactory {
 
 type RegistryFactory = (version: string) => RegistryLike;
 type BlockLoader = (registry: RegistryLike) => PrismarineBlockFactory;
+
+const registryFactory = prismarineRegistryFactory as unknown as RegistryFactory;
+const blockLoader = prismarineBlockLoader as unknown as BlockLoader;
 
 export type RuntimeBlockResolver = (runtimeId: number) => BedrockBlockState;
 
@@ -115,8 +117,6 @@ function runtimeRegistryEntry(registry: RegistryLike, runtimeId: number): Regist
 
 /** Resolves network runtime IDs, including signed FNV-1a block hashes on modern Bedrock versions. */
 export function createRuntimeBlockResolver(protocolVersion: string): RuntimeBlockResolver {
-  const registryFactory = require("prismarine-registry") as RegistryFactory;
-  const blockLoader = require("prismarine-block") as BlockLoader;
   let registry: RegistryLike | undefined;
   let lastError: unknown;
   for (const candidate of registryCandidates(protocolVersion)) {
