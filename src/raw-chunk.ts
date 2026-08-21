@@ -13,8 +13,15 @@ interface RegistryBlock {
   readonly stateId?: number;
 }
 
+interface RegistryBlockState {
+  readonly name?: string;
+  readonly states?: Readonly<Record<string, unknown>>;
+}
+
 interface RegistryLike {
-  readonly blocksByRuntimeId?: readonly (RegistryBlock | undefined)[];
+  readonly blocksByRuntimeId?: Readonly<Record<string, RegistryBlock | undefined>> | readonly (RegistryBlock | undefined)[];
+  readonly blockStates?: readonly (RegistryBlockState | undefined)[];
+  supportFeature?: (feature: string) => boolean;
 }
 
 interface PrismarineBlockLike {
@@ -25,6 +32,7 @@ interface PrismarineBlockLike {
 
 interface PrismarineBlockFactory {
   fromStateId(stateId: number): PrismarineBlockLike;
+  getHash?: (name: string, states: Readonly<Record<string, unknown>>) => number | undefined;
 }
 
 type RegistryFactory = (version: string) => RegistryLike;
@@ -99,6 +107,13 @@ function registryCandidates(version: string): string[] {
   return [...new Set(candidates)];
 }
 
+function runtimeRegistryEntry(registry: RegistryLike, runtimeId: number): RegistryBlock | undefined {
+  const table = registry.blocksByRuntimeId;
+  if (!table) return undefined;
+  return (table as Readonly<Record<string, RegistryBlock | undefined>>)[String(runtimeId)];
+}
+
+/** Resolves network runtime IDs, including signed FNV-1a block hashes on modern Bedrock versions. */
 export function createRuntimeBlockResolver(protocolVersion: string): RuntimeBlockResolver {
   const registryFactory = require("prismarine-registry") as RegistryFactory;
   const blockLoader = require("prismarine-block") as BlockLoader;
@@ -116,11 +131,29 @@ export function createRuntimeBlockResolver(protocolVersion: string): RuntimeBloc
     const message = lastError instanceof Error ? `: ${lastError.message}` : "";
     throw new Error(`No Prismarine Bedrock registry for protocol version ${protocolVersion}${message}`);
   }
+
   const Block = blockLoader(registry);
+  const hashedRuntimeIds = registry.supportFeature?.("blockHashes") === true;
+  const hashToStateId = new Map<number, number>();
+  if (hashedRuntimeIds && Block.getHash) {
+    for (const [stateId, state] of (registry.blockStates ?? []).entries()) {
+      if (!state?.name) continue;
+      const hash = Block.getHash(state.name, state.states ?? {});
+      if (typeof hash === "number" && Number.isInteger(hash)) hashToStateId.set(hash | 0, stateId);
+    }
+  }
+
   return (runtimeId) => {
-    if (!Number.isInteger(runtimeId) || runtimeId < 0) throw new TypeError(`Invalid Bedrock runtime block ID: ${runtimeId}`);
-    const registryEntry = registry.blocksByRuntimeId?.[runtimeId];
-    const stateId = registryEntry?.stateId ?? runtimeId;
+    if (!Number.isInteger(runtimeId) || runtimeId < -0x80000000 || runtimeId > 0x7fffffff) {
+      throw new TypeError(`Invalid Bedrock runtime block ID: ${runtimeId}`);
+    }
+    const registryEntry = runtimeRegistryEntry(registry, runtimeId);
+    const stateId = registryEntry?.stateId
+      ?? (hashedRuntimeIds ? hashToStateId.get(runtimeId) : runtimeId);
+    if (stateId === undefined) {
+      throw new Error(`Unknown Bedrock runtime block ID ${runtimeId} for ${protocolVersion}`);
+    }
+
     let block: PrismarineBlockLike;
     try {
       block = Block.fromStateId(stateId);
@@ -128,6 +161,7 @@ export function createRuntimeBlockResolver(protocolVersion: string): RuntimeBloc
       const message = error instanceof Error ? `: ${error.message}` : "";
       throw new Error(`Unknown Bedrock runtime block ID ${runtimeId} for ${protocolVersion}${message}`);
     }
+    if (!block.name) throw new Error(`Unknown Bedrock runtime block ID ${runtimeId} for ${protocolVersion}`);
     const rawProperties = block.getProperties?.() ?? block.getProps?.() ?? {};
     const states = normalizeProperties(rawProperties);
     const name = block.name.includes(":") ? block.name : `minecraft:${block.name}`;
@@ -145,7 +179,7 @@ function decodeStorage(reader: BufferReader, resolveRuntimeId: RuntimeBlockResol
   if ((paletteType & 1) === 0) throw new Error("Persistent Bedrock subchunk palettes are not valid in live runtime packets");
   const bitsPerBlock = paletteType >>> 1;
   if (bitsPerBlock === 0) {
-    const runtimeId = reader.readUnsignedVarInt() >>> 1;
+    const runtimeId = reader.readZigZagVarInt();
     return { palette: [resolveRuntimeId(runtimeId)], indexes: new Uint16Array(4096) };
   }
   if (![1, 2, 3, 4, 5, 6, 8, 16].includes(bitsPerBlock)) throw new Error(`Unsupported Bedrock bits-per-block value: ${bitsPerBlock}`);
@@ -176,6 +210,14 @@ export interface DecodedRuntimeSubChunk {
   readonly sectionY: number;
   readonly blocks: readonly CaptureBlock[];
   readonly bytesRead: number;
+}
+
+function isAir(block: BedrockBlockState): boolean {
+  return block.name === "minecraft:air" || block.name === "air";
+}
+
+function isWater(block: BedrockBlockState): boolean {
+  return block.name === "minecraft:water" || block.name === "minecraft:flowing_water" || block.name === "water" || block.name === "flowing_water";
 }
 
 /** Decodes one network-runtime Bedrock subchunk (versions 1, 8, and 9). */
@@ -212,8 +254,12 @@ export function decodeRuntimeSubChunk(
         let block = base;
         if (secondary) {
           const overlay = secondary.palette[secondary.indexes[linear]!]!;
-          if (overlay.name === "minecraft:water" || overlay.name === "minecraft:flowing_water") {
-            block = { ...base, states: { ...(base.states ?? {}), waterlogged_bit: true } };
+          if (isWater(overlay)) {
+            block = isAir(base)
+              ? overlay
+              : { ...base, states: { ...(base.states ?? {}), waterlogged_bit: true } };
+          } else if (isAir(base) && !isAir(overlay)) {
+            block = overlay;
           }
         }
         blocks.push({
