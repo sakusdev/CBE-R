@@ -44,6 +44,21 @@ test("decodes a version 9 singleton runtime palette", () => {
   });
 });
 
+test("preserves signed runtime hashes in singleton palettes", () => {
+  const hash = -123456789;
+  const payload = Buffer.concat([
+    Buffer.from([9, 1, 0, 1]),
+    zigZagVarInt(hash),
+  ]);
+  let seen: number | undefined;
+  const decoded = decodeRuntimeSubChunk(payload, 0, 0, 0, (runtimeId) => {
+    seen = runtimeId;
+    return { name: "minecraft:stone" };
+  });
+  assert.equal(seen, hash);
+  assert.equal(decoded.blocks[0]?.block.name, "minecraft:stone");
+});
+
 test("decodes packed palette indexes in XZY order", () => {
   const words = Buffer.alloc(128 * 4);
   words.writeUInt32LE(1, 0);
@@ -76,4 +91,18 @@ test("marks water from the second storage as waterlogged", () => {
     return { name: "minecraft:air" };
   });
   assert.equal(decoded.blocks[0]?.block.states?.waterlogged_bit, true);
+});
+
+test("promotes secondary water when the primary layer is air", () => {
+  const payload = Buffer.concat([
+    Buffer.from([9, 2, 0, 1]),
+    zigZagVarInt(0),
+    Buffer.from([1]),
+    zigZagVarInt(3),
+  ]);
+  const decoded = decodeRuntimeSubChunk(payload, 0, 0, 0, (runtimeId) => ({
+    name: runtimeId === 3 ? "minecraft:water" : "minecraft:air",
+  }));
+  assert.equal(decoded.blocks[0]?.block.name, "minecraft:water");
+  assert.equal(decoded.blocks[0]?.block.states?.waterlogged_bit, undefined);
 });
