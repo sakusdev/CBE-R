@@ -3,8 +3,11 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 import assert from "node:assert/strict";
+import { createRequire } from "node:module";
 import test from "node:test";
-import { decodeRuntimeSubChunk } from "../src/raw-chunk.js";
+import { createRuntimeBlockResolver, decodeRuntimeSubChunk } from "../src/raw-chunk.js";
+
+const require = createRequire(import.meta.url);
 
 function unsignedVarInt(value: number): Buffer {
   const bytes: number[] = [];
@@ -57,6 +60,45 @@ test("preserves signed runtime hashes in singleton palettes", () => {
   });
   assert.equal(seen, hash);
   assert.equal(decoded.blocks[0]?.block.name, "minecraft:stone");
+});
+
+test("resolves a real signed Prismarine block hash", () => {
+  type LooseRegistry = {
+    readonly blockStates?: readonly { readonly name?: string; readonly states?: Readonly<Record<string, unknown>> }[];
+    supportFeature?: (feature: string) => boolean;
+  };
+  type LooseBlockFactory = {
+    getHash?: (name: string, states: Readonly<Record<string, unknown>>) => number | undefined;
+  };
+  const registryFactory = require("prismarine-registry") as (version: string) => LooseRegistry;
+  const blockLoader = require("prismarine-block") as (registry: LooseRegistry) => LooseBlockFactory;
+  const versions = ["1.26.40", "1.21.130", "1.21.120", "1.21.100", "1.21.80"];
+  let selected: { version: string; hash: number; name: string } | undefined;
+
+  for (const version of versions) {
+    let registry: LooseRegistry;
+    try {
+      registry = registryFactory(`bedrock_${version}`);
+    } catch {
+      continue;
+    }
+    if (registry.supportFeature?.("blockHashes") !== true) continue;
+    const Block = blockLoader(registry);
+    if (!Block.getHash) continue;
+    for (const state of registry.blockStates ?? []) {
+      if (!state?.name) continue;
+      const hash = Block.getHash(state.name, state.states ?? {});
+      if (typeof hash === "number" && hash < 0) {
+        selected = { version, hash, name: state.name.includes(":") ? state.name : `minecraft:${state.name}` };
+        break;
+      }
+    }
+    if (selected) break;
+  }
+
+  assert.ok(selected, "expected an installed Bedrock registry with a negative block hash");
+  const resolved = createRuntimeBlockResolver(selected.version)(selected.hash);
+  assert.equal(resolved.name, selected.name);
 });
 
 test("decodes packed palette indexes in XZY order", () => {
