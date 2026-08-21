@@ -11,8 +11,8 @@ export type {
 } from "./bedrock.js";
 export { convertBedrockBlockEntity } from "./block-entity.js";
 export type { ConvertBlockEntityOptions } from "./block-entity.js";
-export { captureBedrockSession, serializeJournalRecord } from "./live.js";
-export type { CaptureSummary, LiveCaptureOptions, PacketJournalRecord } from "./live.js";
+export { captureBedrockSession, normalizePacketEvent, serializeJournalRecord, startBedrockCapture } from "./live.js";
+export type { CaptureSummary, LiveCaptureOptions, LiveCaptureSession, PacketJournalRecord } from "./live.js";
 export {
   decodeJournalToCapture,
   extractChunkJournal,
