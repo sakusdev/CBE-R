@@ -3,10 +3,8 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 import { appendFile, mkdir, writeFile } from "node:fs/promises";
-import { createRequire } from "node:module";
 import { dirname, resolve } from "node:path";
-
-const require = createRequire(import.meta.url);
+import * as bedrockProtocol from "bedrock-protocol";
 
 interface LooseClient {
   readonly options?: { readonly version?: unknown };
@@ -17,6 +15,8 @@ interface LooseClient {
 interface BedrockProtocolModule {
   createClient(options: Record<string, unknown>): LooseClient;
 }
+
+const bedrock = bedrockProtocol as unknown as BedrockProtocolModule;
 
 export interface LiveCaptureOptions {
   readonly host: string;
@@ -134,7 +134,6 @@ export async function startBedrockCapture(options: LiveCaptureOptions): Promise<
     },
   });
 
-  const bedrock = require("bedrock-protocol") as BedrockProtocolModule;
   const clientOptions: Record<string, unknown> = {
     host: options.host,
     port: options.port ?? 19132,
