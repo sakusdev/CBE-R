@@ -37,6 +37,16 @@ export interface CaptureSummary {
   readonly startedAt: string;
   readonly endedAt: string;
   readonly closeReason: string;
+  readonly version?: string;
+}
+
+export interface LiveCaptureSession {
+  readonly output: string;
+  readonly startedAt: string;
+  readonly packets: number;
+  readonly version?: string;
+  readonly done: Promise<CaptureSummary>;
+  stop(reason?: string): void;
 }
 
 export interface PacketJournalRecord {
@@ -45,6 +55,10 @@ export interface PacketJournalRecord {
   readonly name?: string;
   readonly data?: unknown;
   readonly version?: string;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
 function jsonSafe(value: unknown, seen = new WeakSet<object>()): unknown {
@@ -64,6 +78,19 @@ function negotiatedClientVersion(client: LooseClient): string | undefined {
   if (typeof version === "string" && version.length > 0) return version;
   if (typeof version === "number" && Number.isFinite(version)) return String(version);
   return undefined;
+}
+
+/** Normalizes both the current single-deserializer-result event and legacy `(packet, meta)` packet events. */
+export function normalizePacketEvent(packet: unknown, meta?: unknown): { name: string; data: unknown } {
+  if (isRecord(packet) && isRecord(packet.data)) {
+    const name = typeof packet.data.name === "string" ? packet.data.name : undefined;
+    if (name && "params" in packet.data) return { name, data: packet.data.params };
+  }
+  if (isRecord(meta) && typeof meta.name === "string") return { name: meta.name, data: packet };
+  if (isRecord(packet) && typeof packet.name === "string") {
+    return { name: packet.name, data: "params" in packet ? packet.params : packet };
+  }
+  return { name: "unknown", data: packet };
 }
 
 export function serializeJournalRecord(record: PacketJournalRecord): string {
@@ -86,7 +113,8 @@ class JournalWriter {
   }
 }
 
-export async function captureBedrockSession(options: LiveCaptureOptions): Promise<CaptureSummary> {
+/** Starts a capture that can be stopped by the caller without installing process-wide signal handlers. */
+export async function startBedrockCapture(options: LiveCaptureOptions): Promise<LiveCaptureSession> {
   const output = resolve(options.output);
   await mkdir(dirname(output), { recursive: true });
   await writeFile(output, "", "utf8");
@@ -124,74 +152,106 @@ export async function captureBedrockSession(options: LiveCaptureOptions): Promis
   let closeReason = "closed";
   let timeout: NodeJS.Timeout | undefined;
   let negotiatedVersion = options.version;
-
-  return await new Promise<CaptureSummary>((resolvePromise, rejectPromise) => {
-    const client = bedrock.createClient(clientOptions);
-
-    const finish = async (reason: string, error?: unknown): Promise<void> => {
-      if (settled) return;
-      settled = true;
-      closeReason = reason;
-      if (timeout) clearTimeout(timeout);
-      const endedAt = new Date().toISOString();
-      try {
-        await writer.append({ type: "footer", time: endedAt, data: { packets, closeReason }, ...(negotiatedVersion ? { version: negotiatedVersion } : {}) });
-        await writer.flush();
-      } catch (writeError) {
-        rejectPromise(writeError);
-        return;
-      }
-      if (error) {
-        rejectPromise(error instanceof Error ? error : new Error(String(error)));
-      } else {
-        resolvePromise({ output, packets, startedAt, endedAt, closeReason });
-      }
-    };
-
-    // createClient resolves auto-versioning from the server ping before emitting connect_allowed.
-    client.on("connect_allowed", () => {
-      negotiatedVersion ??= negotiatedClientVersion(client);
-      void writer.append({ type: "event", time: new Date().toISOString(), name: "connect_allowed", ...(negotiatedVersion ? { version: negotiatedVersion } : {}) });
-    });
-    client.on("status", (status) => {
-      void writer.append({ type: "event", time: new Date().toISOString(), name: "status", data: status, ...(negotiatedVersion ? { version: negotiatedVersion } : {}) });
-    });
-    client.on("join", () => {
-      void writer.append({ type: "event", time: new Date().toISOString(), name: "join", ...(negotiatedVersion ? { version: negotiatedVersion } : {}) });
-    });
-    client.on("spawn", () => {
-      void writer.append({ type: "event", time: new Date().toISOString(), name: "spawn", ...(negotiatedVersion ? { version: negotiatedVersion } : {}) });
-    });
-    client.on("packet", (packet, meta) => {
-      packets += 1;
-      negotiatedVersion ??= negotiatedClientVersion(client);
-      const packetName = typeof meta === "object" && meta !== null && "name" in meta
-        ? String((meta as { name: unknown }).name)
-        : "unknown";
-      void writer.append({ type: "packet", time: new Date().toISOString(), name: packetName, data: packet, ...(negotiatedVersion ? { version: negotiatedVersion } : {}) });
-    });
-    client.on("kick", (reason) => {
-      void writer.append({ type: "event", time: new Date().toISOString(), name: "kick", data: reason, ...(negotiatedVersion ? { version: negotiatedVersion } : {}) });
-      void finish("kick");
-    });
-    client.on("error", (error) => {
-      void writer.append({ type: "event", time: new Date().toISOString(), name: "error", data: error, ...(negotiatedVersion ? { version: negotiatedVersion } : {}) });
-      void finish("error", error);
-    });
-    client.on("close", () => void finish(closeReason));
-
-    const stop = (): void => {
-      closeReason = "signal";
-      client.close();
-    };
-    process.once("SIGINT", stop);
-    process.once("SIGTERM", stop);
-
-    if (options.durationMs && options.durationMs > 0) {
-      timeout = setTimeout(() => {
-        closeReason = "duration";
-        client.close();
-      }, options.durationMs);
-    }
+  let resolveDone!: (summary: CaptureSummary) => void;
+  let rejectDone!: (error: Error) => void;
+  const done = new Promise<CaptureSummary>((resolvePromise, rejectPromise) => {
+    resolveDone = resolvePromise;
+    rejectDone = rejectPromise;
   });
+
+  const client = bedrock.createClient(clientOptions);
+  const finish = async (reason: string, error?: unknown): Promise<void> => {
+    if (settled) return;
+    settled = true;
+    closeReason = reason;
+    if (timeout) clearTimeout(timeout);
+    negotiatedVersion ??= negotiatedClientVersion(client);
+    const endedAt = new Date().toISOString();
+    try {
+      await writer.append({
+        type: "footer",
+        time: endedAt,
+        data: { packets, closeReason },
+        ...(negotiatedVersion ? { version: negotiatedVersion } : {}),
+      });
+      await writer.flush();
+    } catch (writeError) {
+      rejectDone(writeError instanceof Error ? writeError : new Error(String(writeError)));
+      return;
+    }
+    if (error) {
+      rejectDone(error instanceof Error ? error : new Error(String(error)));
+    } else {
+      resolveDone({ output, packets, startedAt, endedAt, closeReason, ...(negotiatedVersion ? { version: negotiatedVersion } : {}) });
+    }
+  };
+
+  // createClient resolves auto-versioning from the server ping before emitting connect_allowed.
+  client.on("connect_allowed", () => {
+    negotiatedVersion ??= negotiatedClientVersion(client);
+    void writer.append({ type: "event", time: new Date().toISOString(), name: "connect_allowed", ...(negotiatedVersion ? { version: negotiatedVersion } : {}) });
+  });
+  client.on("status", (status) => {
+    void writer.append({ type: "event", time: new Date().toISOString(), name: "status", data: status, ...(negotiatedVersion ? { version: negotiatedVersion } : {}) });
+  });
+  client.on("join", () => {
+    void writer.append({ type: "event", time: new Date().toISOString(), name: "join", ...(negotiatedVersion ? { version: negotiatedVersion } : {}) });
+  });
+  client.on("spawn", () => {
+    void writer.append({ type: "event", time: new Date().toISOString(), name: "spawn", ...(negotiatedVersion ? { version: negotiatedVersion } : {}) });
+  });
+  client.on("packet", (packet, meta) => {
+    packets += 1;
+    negotiatedVersion ??= negotiatedClientVersion(client);
+    const normalized = normalizePacketEvent(packet, meta);
+    void writer.append({
+      type: "packet",
+      time: new Date().toISOString(),
+      name: normalized.name,
+      data: normalized.data,
+      ...(negotiatedVersion ? { version: negotiatedVersion } : {}),
+    });
+  });
+  client.on("kick", (reason) => {
+    void writer.append({ type: "event", time: new Date().toISOString(), name: "kick", data: reason, ...(negotiatedVersion ? { version: negotiatedVersion } : {}) });
+    void finish("kick");
+  });
+  client.on("error", (error) => {
+    void writer.append({ type: "event", time: new Date().toISOString(), name: "error", data: error, ...(negotiatedVersion ? { version: negotiatedVersion } : {}) });
+    void finish("error", error);
+  });
+  client.on("close", () => void finish(closeReason));
+
+  if (options.durationMs && options.durationMs > 0) {
+    timeout = setTimeout(() => {
+      closeReason = "duration";
+      client.close();
+    }, options.durationMs);
+  }
+
+  return {
+    output,
+    startedAt,
+    get packets() { return packets; },
+    get version() { return negotiatedVersion ?? negotiatedClientVersion(client); },
+    done,
+    stop(reason = "manual") {
+      if (settled) return;
+      closeReason = reason;
+      client.close();
+    },
+  };
+}
+
+export async function captureBedrockSession(options: LiveCaptureOptions): Promise<CaptureSummary> {
+  const session = await startBedrockCapture(options);
+  const stop = (): void => session.stop("signal");
+  process.once("SIGINT", stop);
+  process.once("SIGTERM", stop);
+  try {
+    return await session.done;
+  } finally {
+    process.off("SIGINT", stop);
+    process.off("SIGTERM", stop);
+  }
 }
