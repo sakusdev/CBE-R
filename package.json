@@ -1,6 +1,6 @@
 {
   "name": "cbe-r",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "Capture Bedrock Edition structures and export them as Java Edition structure NBT.",
   "type": "module",
   "license": "MPL-2.0",
@@ -27,7 +27,7 @@
     "gui": "node dist/src/gui-cli.js"
   },
   "dependencies": {
-    "bedrock-protocol": "^3.56.1",
+    "bedrock-protocol": "^3.58.2",
     "prismarine-block": "^1.23.0",
     "prismarine-registry": "^1.12.0"
   },
